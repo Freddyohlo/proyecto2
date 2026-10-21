@@ -1,0 +1,77 @@
+# Copia este archivo a "config.toml" y ajusta los valores.
+# NO pongas contrasenas aqui: estas viven en el Administrador de credenciales
+# de Windows (ver src/credentials.py) o en variables de entorno.
+
+[app]
+nombre = "Blue Yonder"
+# Ruta al ejecutable en el PC dedicado (ajustar alla)
+exe = "C:\\Program Files\\Blue Yonder\\Cliente\\cliente.exe"
+# Segundos a esperar entre pasos de la UI
+espera_ui = 2.0
+
+[credenciales]
+# Nombre del servicio en keyring (Administrador de credenciales de Windows)
+servicio = "blueyonder"
+usuario = "RESIDENTE-STG"
+
+# --- Columnas de la grilla, en el orden en que salen al copiar (Ctrl+A / Ctrl+C) ---
+# Ajusta los nombres segun el significado real de cada columna.
+[[columnas]]
+clave = "planta"
+titulo = "AREA SAP"
+
+[[columnas]]
+clave = "ubicacion"
+titulo = "Ubicación"
+
+[[columnas]]
+clave = "sku"
+titulo = "Número de artículo"
+
+[[columnas]]
+clave = "descripcion"
+titulo = "Descripción"
+
+[[columnas]]
+clave = "cantidad"
+titulo = "Cantidad"
+tipo = "numero"
+
+[[columnas]]
+clave = "estado"
+titulo = "Estado de inventario"
+
+[[columnas]]
+clave = "lpn"
+titulo = "Cantidad de LPN"
+tipo = "numero"
+
+[[columnas]]
+clave = "area"
+titulo = "Área"
+
+[reporte]
+titulo = "Reporte Diario de Stock"
+# Columna por la que se agrupa en el resumen (opcional)
+agrupar_por = "planta"
+# Columna numerica a totalizar (opcional)
+totalizar = "cantidad"
+# Si al copiar la grilla viene una fila de encabezado, poner cuantas lineas saltar
+saltar_encabezado = 0
+# Descarta filas que contengan ciertos textos en alguna columna (ej: filas de TOTAL)
+# [reporte.ignorar_si_contiene]
+# planta = ["TOTAL"]
+
+[correo]
+# Gmail / Google Workspace empresarial
+host = "smtp.gmail.com"
+puerto = 587
+seguridad = "starttls"   # starttls | ssl | ninguna
+remitente = "reportes@tuempresa.com"
+# El usuario SMTP (tu cuenta corporativa completa); la contrasena se lee de
+# keyring. Gmail exige una "Contrasena de aplicacion" (ver docs/GUIA_LOGIN_Y_CAPTURA.md)
+servicio_keyring = "smtp_reporte"
+usuario_keyring = "reportes@tuempresa.com"
+destinatarios = ["dest1@tuempresa.com", "dest2@tuempresa.com"]
+# Deja vacio para no usar copia
+cc = []

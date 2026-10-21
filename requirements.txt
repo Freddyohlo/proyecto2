@@ -1,0 +1,7 @@
+pandas>=2.0
+jinja2>=3.1
+pyperclip>=1.8
+keyring>=24.0
+# --- Automatizacion de UI (solo necesarias en el PC con Blue Yonder) ---
+# pyautogui>=0.9
+# pywinauto>=0.6.8

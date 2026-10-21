@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>{{ titulo }}</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --txt:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+         background: #f1f5f9; color:#1e293b; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  header { display:flex; justify-content:space-between; align-items:baseline;
+           border-bottom:3px solid var(--accent); padding-bottom:12px; margin-bottom:24px; }
+  h1 { font-size: 22px; margin:0; }
+  .fecha { color:#64748b; font-size:13px; }
+  .tarjetas { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:28px; }
+  .tarjeta { flex:1; min-width:200px; background:var(--bg); color:var(--txt);
+             border-radius:12px; padding:18px 20px; }
+  .tarjeta .lbl { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  .tarjeta .val { font-size:30px; font-weight:700; margin-top:6px; }
+  h2 { font-size:16px; margin:28px 0 12px; }
+  table { width:100%; border-collapse:collapse; background:#fff; border-radius:10px;
+          overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.08); font-size:14px; }
+  th { background:#e2e8f0; text-align:left; padding:10px 12px; font-size:12px;
+       text-transform:uppercase; letter-spacing:.04em; color:#475569; }
+  td { padding:8px 12px; border-top:1px solid #f1f5f9; }
+  tr:nth-child(even) td { background:#fafbfc; }
+  .nota { color:#64748b; font-size:12px; margin-top:8px; }
+  .barra { display:inline-block; height:10px; background:var(--accent); border-radius:5px; vertical-align:middle; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>{{ titulo }}</h1>
+    <div class="fecha">Generado: {{ fecha }}</div>
+  </header>
+
+  <div class="tarjetas">
+    <div class="tarjeta">
+      <div class="lbl">Registros</div>
+      <div class="val">{{ resumen.total_filas }}</div>
+    </div>
+    {% if resumen.total is defined %}
+    <div class="tarjeta">
+      <div class="lbl">Total</div>
+      <div class="val">{{ "%.0f"|format(resumen.total) }}</div>
+    </div>
+    {% endif %}
+    {% if resumen.grupos is defined %}
+    <div class="tarjeta">
+      <div class="lbl">Grupos</div>
+      <div class="val">{{ resumen.grupos|length }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if resumen.grupos is defined %}
+  <h2>Resumen por {{ resumen.agrupar_titulo }}</h2>
+  <table>
+    <thead>
+      <tr><th>Grupo</th><th>Registros</th>{% if resumen.total is defined %}<th>Total</th><th></th>{% endif %}</tr>
+    </thead>
+    <tbody>
+      {% set maxval = resumen.grupos | map(attribute='total', default=resumen.grupos[0].cantidad_filas) | max %}
+      {% for g in resumen.grupos %}
+      <tr>
+        <td>{{ g.grupo }}</td>
+        <td>{{ g.cantidad_filas }}</td>
+        {% if g.total is defined %}<td>{{ "%.0f"|format(g.total) }}</td>
+        <td><span class="barra" style="width: {{ (g.total / maxval * 180) if maxval else 0 }}px"></span></td>{% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>Detalle</h2>
+  <table>
+    <thead>
+      <tr>{% for c in columnas %}<th>{{ c.titulo }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      {% for fila in filas[:filas_preview] %}
+      <tr>{% for c in columnas %}<td>{{ fila[c.clave] }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if resumen.total_filas > filas_preview %}
+  <p class="nota">Mostrando {{ filas_preview }} de {{ resumen.total_filas }} registros. El detalle completo va adjunto.</p>
+  {% endif %}
+</div>
+</body>
+</html>
