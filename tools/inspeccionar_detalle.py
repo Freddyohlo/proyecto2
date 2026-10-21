@@ -56,13 +56,37 @@ def titulo_actual(ventana) -> str:
 
 
 def _seleccionar_area(ventana, area: str) -> bool:
-    """Elige `area` en el combo arecod. Prueba select() y, si falla, abre y elige por texto."""
+    """Elige `area` en el combo arecod.
+
+    Si `area` es vacio ("") deja el combo SIN seleccion: en Blue Yonder eso hace
+    que la consulta traiga TODAS las areas (picking + almacenamiento).
+    """
     combo = capture_ui._buscar(ventana, COMBO_AREA, control_type="ComboBox")
     if combo is None:
         combo = capture_ui._buscar(ventana, COMBO_AREA)
     if combo is None:
         print(f"   [!] No encontre el combo de area {COMBO_AREA!r}.")
         return False
+
+    if area == "":
+        # Intentar limpiar la seleccion (varias estrategias; se ignora si fallan)
+        for intento in ("select", "text", "esc"):
+            try:
+                if intento == "select":
+                    combo.select("")
+                elif intento == "text":
+                    combo.set_edit_text("")
+                else:
+                    combo.set_focus()
+                    combo.type_keys("{ESC}")
+                print(f"   (combo de area limpiado con {intento!r} -> quedan TODAS las areas)")
+                time.sleep(1.0)
+                return True
+            except Exception as e:
+                print(f"   (limpiar con {intento!r} no funciono: {e})")
+        print("   [!] No pude limpiar el combo; dejalo VACIO a mano y reintenta.")
+        return False
+
     try:
         combo.select(area)
         print(f"   (area seleccionada por select(): {area!r})")
@@ -198,13 +222,15 @@ def _nombres_columnas(ventana) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--area", default="AREA VALORADO", help="Area a seleccionar")
+    ap.add_argument("--area", default="",
+                    help="Area a seleccionar. Vacio (por defecto) = TODAS las areas")
     ap.add_argument("--sin-menu", action="store_true",
                     help="No navegar el menu; usar la pantalla actual")
     ap.add_argument("--sin-detalle", action="store_true", help="No marcar Detalle")
     ap.add_argument("--sin-buscar", action="store_true",
                     help="No pulsar Buscar; solo leer la pantalla actual")
     args = ap.parse_args()
+    area = "" if args.area.strip().lower() in ("", "todas", "all") else args.area
 
     cfg = config.cargar("config.toml")
 
@@ -228,8 +254,9 @@ def main() -> int:
         print("[1] Navegacion por menu OMITIDA (--sin-menu).")
 
     # [2] Seleccionar area
-    print(f"\n[2] Seleccionando area {args.area!r} en el combo {COMBO_AREA!r}...")
-    if not _seleccionar_area(ventana, args.area):
+    etiqueta_area = "TODAS las areas (vacio)" if area == "" else repr(area)
+    print(f"\n[2] Seleccionando area {etiqueta_area} en el combo {COMBO_AREA!r}...")
+    if not _seleccionar_area(ventana, area):
         diagnostico(ventana, "al elegir area")
 
     # [3]+[4] Marcar Detalle y buscar, verificando que las columnas cambien
