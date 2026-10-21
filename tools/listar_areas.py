@@ -88,9 +88,13 @@ def main() -> int:
         except Exception as e:
             print(f"   [!] FALLO la navegacion: {e}")
 
-    print("\n[2] Controles de la ventana (auto_id, tipo, texto):")
-    for linea in capture_ui.listar_controles(ventana)[:150]:
-        print("   ", linea)
+    print("\n[2] Controles utiles de la ventana (filtros de la cuadratura):")
+    # Solo los controles que nos importan (evita volcar paneles ajenos con datos personales)
+    utiles = ("arecod", "stoloc", "prtnum", "lodnum", "invsts", "short_dsc", "hld_flg",
+              "gridMst", "GridView:Parent=Control")
+    for linea in capture_ui.listar_controles(ventana):
+        if any(u in linea for u in utiles):
+            print("   ", linea)
 
     combo = capture_ui._buscar(ventana, COMBO_AREA, control_type="ComboBox")
     if combo is None:
