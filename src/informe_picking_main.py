@@ -80,14 +80,13 @@ def main() -> int:
     proy = ip.proyectar(resumen, meta=args.meta, hora_limite=args.hora_limite)
 
     print(f"\nTotal pickeado: {proy.total_cajas} / {proy.meta} ({proy.pct_avance}%)")
-    print(f"Horas-hombre totales: {proy.total_horas_hombre} | "
-          f"Cajas por hora-hombre: {proy.cajas_por_hora_hombre}")
+    print(f"Viajes: {proy.total_viajes} | Cajas por viaje: {proy.cajas_por_viaje}")
     print(f"Ritmo: {proy.tasa_actual} cajas/hora | Termino estimado: {proy.hora_termino}")
     print(f"{proy.alerta}\n")
 
     print("Detalle por hora real (segun h_inicio):")
     print(resumen[["etiqueta", "cajas", "pickeadores", "viajes",
-                   "horas_hombre", "cajas_por_hora_hombre"]].to_string(index=False))
+                   "cajas_por_pickeador", "cajas_por_viaje"]].to_string(index=False))
 
     fecha = args.fecha or datetime.now().strftime("%Y-%m-%d")
     salida = Path("output")
@@ -95,8 +94,12 @@ def main() -> int:
     html = ip.generar_html(resumen, proy, args.meta, args.titulo, fecha,
                            salida / f"informe_picking_{fecha}.html")
     xlsx = ip.generar_excel(resumen, proy, args.meta, salida / f"informe_picking_{fecha}.xlsx")
-    print(f"\nHTML:  {html}")
-    print(f"Excel: {xlsx}")
+
+    # Rutas ABSOLUTAS y en formato file:// para abrirlas con un clic
+    print("\n=== ARCHIVOS GENERADOS (haz clic o copia y pega en el navegador) ===")
+    print(f"HTML : {html.resolve()}")
+    print(f"       {html.resolve().as_uri()}")
+    print(f"Excel: {xlsx.resolve()}")
     return 0
 
 

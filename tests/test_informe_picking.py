@@ -56,7 +56,7 @@ def test_duracion_cruza_medianoche():
     assert abs(dur - (40 / 60)) < 0.01  # 40 minutos
 
 
-def test_resumen_por_hora_cajas_pickeadores_y_horas_hombre():
+def test_resumen_por_hora_cajas_pickeadores_y_rendimiento():
     # Misma hora (00:00-00:59), dos pickeadores, cada viaje de 30 min
     t = "\n".join([
         _fila("AJMARTINH", "22/10/2026 00:00:00", "22/10/2026 00:30:00", 100),
@@ -68,8 +68,9 @@ def test_resumen_por_hora_cajas_pickeadores_y_horas_hombre():
     assert fila["cajas"] == 204
     assert fila["pickeadores"] == 2
     assert fila["viajes"] == 2
-    assert abs(fila["horas_hombre"] - 1.0) < 0.01     # 0.5 + 0.5
-    assert abs(fila["cajas_por_hora_hombre"] - 204.0) < 0.1
+    assert fila["cajas_por_pickeador"] == 102.0
+    assert fila["cajas_por_viaje"] == 102.0
+    assert fila["min_por_viaje"] == 30.0
 
 
 def test_proyectar_avance_y_termino():

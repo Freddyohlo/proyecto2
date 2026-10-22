@@ -107,9 +107,16 @@ def leer_tsv(texto: str) -> ResultadoLectura:
 # Agregacion por hora real
 # --------------------------------------------------------------------------
 def resumen_por_hora(df: pd.DataFrame) -> pd.DataFrame:
-    """Tabla por hora real de trabajo (segun h_inicio)."""
+    """Tabla por hora real de trabajo (segun h_inicio).
+
+    Nota sobre la duracion: `h_termino - h_inicio` es la duracion de UN viaje/LPN,
+    que puede ser de segundos. NO representa horas trabajadas, por eso se reporta
+    solo como promedio por viaje (informativo), y las metricas de rendimiento son
+    cajas por pickeador y cajas por viaje.
+    """
     vacio = pd.DataFrame(columns=["hora_ts", "etiqueta", "cajas", "pickeadores",
-                                  "viajes", "horas_hombre", "cajas_por_hora_hombre"])
+                                  "viajes", "cajas_por_pickeador", "cajas_por_viaje",
+                                  "min_por_viaje"])
     if df.empty:
         return vacio
 
@@ -119,18 +126,17 @@ def resumen_por_hora(df: pd.DataFrame) -> pd.DataFrame:
             cajas=("cajas", "sum"),
             pickeadores=("quien", "nunique"),
             viajes=("cajas", "size"),
-            horas_hombre=("duracion_h", "sum"),
+            minutos=("duracion_h", "sum"),
         )
         .reset_index()
         .sort_values("hora_ts")
     )
     g["etiqueta"] = g["hora_ts"].dt.strftime("%d-%m %H:00")
-    g["horas_hombre"] = g["horas_hombre"].round(2)
-    g["cajas_por_hora_hombre"] = (
-        g["cajas"] / g["horas_hombre"].replace(0, pd.NA)
-    ).round(1).fillna(0)
+    g["cajas_por_pickeador"] = (g["cajas"] / g["pickeadores"].replace(0, pd.NA)).round(1).fillna(0)
+    g["cajas_por_viaje"] = (g["cajas"] / g["viajes"].replace(0, pd.NA)).round(1).fillna(0)
+    g["min_por_viaje"] = (g["minutos"] * 60 / g["viajes"].replace(0, pd.NA)).round(1).fillna(0)
     return g[["hora_ts", "etiqueta", "cajas", "pickeadores", "viajes",
-              "horas_hombre", "cajas_por_hora_hombre"]].reset_index(drop=True)
+              "cajas_por_pickeador", "cajas_por_viaje", "min_por_viaje"]].reset_index(drop=True)
 
 
 # --------------------------------------------------------------------------
@@ -141,8 +147,8 @@ class Proyeccion:
     meta: int
     total_cajas: int
     pct_avance: float
-    total_horas_hombre: float
-    cajas_por_hora_hombre: float
+    total_viajes: int
+    cajas_por_viaje: float
     ultima_hora: str | None
     tasa_actual: float           # cajas/hora (promedio reciente)
     horas_restantes: float | None
@@ -162,16 +168,26 @@ def proyectar(
     `ventana_tasa` = cuantas horas recientes (con actividad) usar para el ritmo.
     """
     total = int(resumen["cajas"].sum()) if not resumen.empty else 0
-    hh = float(resumen["horas_hombre"].sum()) if not resumen.empty else 0.0
+    viajes = int(resumen["viajes"].sum()) if not resumen.empty else 0
     pct = (total / meta * 100) if meta else 0.0
-    cph = round(total / hh, 1) if hh else 0.0
+    cpv = round(total / viajes, 1) if viajes else 0.0
 
     ultima = None
     if not resumen.empty:
         ultima = resumen["hora_ts"].max().strftime("%d-%m %H:%M")
 
     activas = resumen[resumen["cajas"] > 0] if not resumen.empty else resumen
-    tasa = float(activas["cajas"].tail(ventana_tasa).mean()) if not activas.empty else 0.0
+    # Ritmo: promedio de las ultimas horas CON ACTIVIDAD SIGNIFICATIVA.
+    # Se descartan las horas de "cola" (limpieza/cierre) que tienen muy poco volumen
+    # y distorsionarian la proyeccion.
+    if not activas.empty:
+        tope = activas["cajas"].max()
+        significativas = activas[activas["cajas"] >= tope * 0.10]
+        if significativas.empty:
+            significativas = activas
+        tasa = float(significativas["cajas"].tail(ventana_tasa).mean())
+    else:
+        tasa = 0.0
 
     horas_restantes = None
     hora_termino = None
@@ -202,7 +218,7 @@ def proyectar(
 
     return Proyeccion(
         meta=meta, total_cajas=total, pct_avance=round(pct, 1),
-        total_horas_hombre=round(hh, 2), cajas_por_hora_hombre=cph,
+        total_viajes=viajes, cajas_por_viaje=cpv,
         ultima_hora=ultima, tasa_actual=round(tasa, 1),
         horas_restantes=round(horas_restantes, 2) if horas_restantes is not None else None,
         hora_termino=hora_termino, alerta=alerta, supera_limite=supera,
@@ -293,8 +309,8 @@ def tabla_para_mostrar(resumen: pd.DataFrame, meta: int) -> list[dict]:
             "cajas": int(r["cajas"]),
             "pickeadores": int(r["pickeadores"]),
             "viajes": int(r["viajes"]),
-            "horas_hombre": r["horas_hombre"],
-            "cajas_por_hora_hombre": r["cajas_por_hora_hombre"],
+            "cajas_por_pickeador": r["cajas_por_pickeador"],
+            "cajas_por_viaje": r["cajas_por_viaje"],
             "acumulado": acum,
             "pct": round(acum / meta * 100, 1) if meta else 0,
         })
@@ -311,8 +327,8 @@ def generar_excel(resumen: pd.DataFrame, proy: Proyeccion, meta: int, destino: s
             {"indicador": "Meta (manual)", "valor": proy.meta},
             {"indicador": "Total pickeado", "valor": proy.total_cajas},
             {"indicador": "% avance", "valor": proy.pct_avance},
-            {"indicador": "Horas-hombre totales", "valor": proy.total_horas_hombre},
-            {"indicador": "Cajas por hora-hombre", "valor": proy.cajas_por_hora_hombre},
+            {"indicador": "Viajes totales", "valor": proy.total_viajes},
+            {"indicador": "Cajas por viaje", "valor": proy.cajas_por_viaje},
             {"indicador": "Ritmo (cajas/hora)", "valor": proy.tasa_actual},
             {"indicador": "Hora estimada termino", "valor": proy.hora_termino or "-"},
             {"indicador": "Alerta", "valor": proy.alerta},

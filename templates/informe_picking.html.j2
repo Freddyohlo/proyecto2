@@ -46,10 +46,11 @@
         <small>/ {{ "{:,}".format(meta).replace(",", ".") }} cajas</small></div></div>
     <div class="card"><div class="lbl">Avance</div>
       <div class="val">{{ proy.pct_avance }}%</div></div>
-    <div class="card"><div class="lbl">Horas-hombre</div>
-      <div class="val">{{ proy.total_horas_hombre }} <small>h</small></div></div>
-    <div class="card"><div class="lbl">Cajas / hora-hombre</div>
-      <div class="val">{{ proy.cajas_por_hora_hombre }}</div></div>
+    <div class="card"><div class="lbl">Viajes</div>
+      <div class="val">{{ "{:,}".format(proy.total_viajes).replace(",", ".") }}
+        <small>· {{ proy.cajas_por_viaje }} cajas/viaje</small></div></div>
+    <div class="card"><div class="lbl">Ritmo</div>
+      <div class="val">{{ proy.tasa_actual }} <small>cajas/hora</small></div></div>
     <div class="card"><div class="lbl">Termino estimado</div>
       <div class="val">{{ proy.hora_termino or "—" }}</div></div>
   </div>
@@ -75,7 +76,7 @@
     <table>
       <thead>
         <tr><th>Hora</th><th>Cajas</th><th>Pickeadores</th><th>Viajes</th>
-            <th>Horas-hombre</th><th>Cajas/h-h</th><th>Acumulado</th><th>% meta</th></tr>
+            <th>Cajas/pickeador</th><th>Cajas/viaje</th><th>Acumulado</th><th>% meta</th></tr>
       </thead>
       <tbody>
         {% for f in filas %}
@@ -84,8 +85,8 @@
           <td>{{ f.cajas }}</td>
           <td>{{ f.pickeadores }}</td>
           <td>{{ f.viajes }}</td>
-          <td>{{ f.horas_hombre }}</td>
-          <td>{{ f.cajas_por_hora_hombre }}</td>
+          <td>{{ f.cajas_por_pickeador }}</td>
+          <td>{{ f.cajas_por_viaje }}</td>
           <td>{{ f.acumulado }}</td>
           <td>{{ f.pct }}%</td>
         </tr>
