@@ -177,12 +177,13 @@ def proyectar(
         ultima = resumen["hora_ts"].max().strftime("%d-%m %H:%M")
 
     activas = resumen[resumen["cajas"] > 0] if not resumen.empty else resumen
-    # Ritmo: promedio de las ultimas horas CON ACTIVIDAD SIGNIFICATIVA.
-    # Se descartan las horas de "cola" (limpieza/cierre) que tienen muy poco volumen
-    # y distorsionarian la proyeccion.
+    # Ritmo: promedio de las horas de PLENA OPERACION.
+    # Las horas de cola (cierre/limpieza) tienen pocos pickeadores y no representan
+    # el ritmo real; se descartan tomando solo horas con al menos el 50% de la
+    # dotacion maxima de pickeadores.
     if not activas.empty:
-        tope = activas["cajas"].max()
-        significativas = activas[activas["cajas"] >= tope * 0.10]
+        max_pick = activas["pickeadores"].max()
+        significativas = activas[activas["pickeadores"] >= max_pick * 0.5]
         if significativas.empty:
             significativas = activas
         tasa = float(significativas["cajas"].tail(ventana_tasa).mean())
