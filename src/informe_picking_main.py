@@ -1,7 +1,10 @@
-"""Genera el informe de productividad de picking desde la pantalla 'CCU Caja Pickeada'.
+"""Genera el informe de productividad de picking desde 'CCU Caja Pickeada'.
+
+La hora de trabajo se toma de `h_inicio` (no de la columna `hora`), para no
+confundir los turnos que cruzan la medianoche.
 
 Modo de uso:
-  # Con un TSV ya capturado (recomendado; funciona en cualquier PC)
+  # Con un TSV ya capturado
   python -m src.informe_picking_main --desde-archivo data/caja_pickeada_2026-10-22.tsv --meta 12000
 
   # Reutiliza el data/caja_pickeada_*.tsv mas reciente
@@ -61,39 +64,37 @@ def main() -> int:
                     help="Meta / venta total de cajas del dia (se ingresa a mano)")
     ap.add_argument("--hora-limite", default="07:00",
                     help="Hora limite antes de que se retiren pickeadores (default 07:00)")
-    ap.add_argument("--hora-actual", type=int, default=None,
-                    help="Hora actual (0-23) para la proyeccion; por defecto la ultima con datos")
     ap.add_argument("--titulo", default="Avance de Picking")
     ap.add_argument("--fecha", default=None, help="Fecha del informe (default: hoy)")
     args = ap.parse_args()
 
     texto = _texto_entrada(args)
     lectura = ip.leer_tsv(texto)
-    print(f"Filas leidas: {lectura.filas} | descartadas: {lectura.descartadas} "
-          f"| normalizadas: {lectura.anomalias}")
-
-    resumen = ip.resumen_por_hora(lectura.dataframe)
-    if resumen.empty:
-        print("[!] No hay datos agrupables. Revisa la captura.")
+    print(f"Filas validas: {lectura.filas} | descartadas: {lectura.descartadas} "
+          f"| normalizadas: {lectura.anomalias} | sin fechas: {lectura.sin_fechas}")
+    if lectura.filas == 0:
+        print("[!] No hay filas con hora de inicio valida. Revisa la captura.")
         return 1
 
-    proy = ip.proyectar(
-        resumen, meta=args.meta,
-        hora_limite=args.hora_limite, hora_actual=args.hora_actual,
-    )
+    resumen = ip.resumen_por_hora(lectura.dataframe)
+    proy = ip.proyectar(resumen, meta=args.meta, hora_limite=args.hora_limite)
+
     print(f"\nTotal pickeado: {proy.total_cajas} / {proy.meta} ({proy.pct_avance}%)")
+    print(f"Horas-hombre totales: {proy.total_horas_hombre} | "
+          f"Cajas por hora-hombre: {proy.cajas_por_hora_hombre}")
     print(f"Ritmo: {proy.tasa_actual} cajas/hora | Termino estimado: {proy.hora_termino}")
     print(f"{proy.alerta}\n")
 
-    print("Detalle por hora:")
-    print(resumen.to_string(index=False))
+    print("Detalle por hora real (segun h_inicio):")
+    print(resumen[["etiqueta", "cajas", "pickeadores", "viajes",
+                   "horas_hombre", "cajas_por_hora_hombre"]].to_string(index=False))
 
     fecha = args.fecha or datetime.now().strftime("%Y-%m-%d")
     salida = Path("output")
     salida.mkdir(exist_ok=True)
-    html = ip.generar_html(resumen, proy, args.titulo, fecha,
+    html = ip.generar_html(resumen, proy, args.meta, args.titulo, fecha,
                            salida / f"informe_picking_{fecha}.html")
-    xlsx = ip.generar_excel(resumen, proy, salida / f"informe_picking_{fecha}.xlsx")
+    xlsx = ip.generar_excel(resumen, proy, args.meta, salida / f"informe_picking_{fecha}.xlsx")
     print(f"\nHTML:  {html}")
     print(f"Excel: {xlsx}")
     return 0
