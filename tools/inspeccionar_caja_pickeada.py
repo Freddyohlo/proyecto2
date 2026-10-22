@@ -1,16 +1,15 @@
-"""Explora la pantalla 'CCU Caja Pickeada' y guarda su grilla.
+"""Explora y captura la pantalla 'CCU Caja Pickeada' (SOLO Windows, ya logueado).
 
-SOLO funciona en el PC Windows con Blue Yonder (ya logueado).
-
-Hace TODO el flujo por si solo:
+Flujo:
   1. Busca la ventana principal de Blue Yonder.
-  2. NAVEGA EL MENU: Aplicaciones > Informes/Etiquetas > CCU Caja Pickeada.
-  3. Vuelca los controles de FILTRO (para descubrir el campo de fecha).
-  4. Opcional: escribe una fecha en el campo de fecha (--fecha).
+  2. Navega: Aplicaciones > Informes/Etiquetas > CCU Caja Pickeada.
+  3. Activa las casillas de fecha **haciendo clic en los panes** `fecha_desde`
+     y `fecha_hasta` (no son CheckBox: son Pane dibujados a mano).
+  4. Opcional: escribe la fecha (--fecha) en esos campos.
   5. Pulsa "Buscar" y espera resultados.
-  6. Vuelca los NOMBRES de columna (HeaderItem) de la grilla, en orden.
+  6. Vuelca los NOMBRES de columna (HeaderItem) de la grilla.
   7. Copia la grilla (Ctrl+A/Ctrl+C) y la guarda en data/caja_pickeada_<fecha>.tsv
-  8. Muestra las primeras 8 filas.
+  8. Muestra las primeras 10 filas.
 
 Uso (en el PC, ya logueado; da igual en que pantalla estes):
     python tools\\inspeccionar_caja_pickeada.py
@@ -32,17 +31,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src import capture_ui, config
 
 GRILLA = capture_ui.GRILLA
+PANE_DESDE = "fecha_desde"
+PANE_HASTA = "fecha_hasta"
 
-# Textos para navegar el menu (se buscan como MenuItem por texto, sin distinguir mayusculas)
 RUTA_MENU = [
     ("Aplicaciones", "aplicaciones"),
     ("Informes/Etiquetas", "informes/etiquetas"),
     ("CCU Caja Pickeada", "caja pickeada"),
 ]
-
-# auto_id de controles que NO son filtros (para excluirlos del volcado)
-NO_FILTRO = {"pnlMenu", "grpMenu", "AppExplorer", "btnPinMenu", "btnFavorites",
-             "btnMenuClose", "lblCurAppTitle", "lblCurAppFlow"}
 
 
 def diagnostico(ventana, etiqueta: str = "") -> None:
@@ -63,7 +59,6 @@ def titulo_actual(ventana) -> str:
 
 
 def navegar(ventana, cfg) -> None:
-    """Aplicaciones > Informes/Etiquetas > CCU Caja Pickeada (por texto de MenuItem)."""
     try:
         ventana.set_focus()
         time.sleep(0.5)
@@ -77,61 +72,46 @@ def navegar(ventana, cfg) -> None:
         time.sleep(cfg.app.espera_ui)
 
 
-def volcar_filtros(ventana) -> None:
-    """Muestra los controles de filtro (Edit/ComboBox/Button) que no son del menu."""
-    print("\n[3] Controles de FILTRO de la pantalla (busca aqui el campo de fecha):")
-    for c in ventana.descendants():
-        try:
-            tipo = c.element_info.control_type
-            if tipo not in ("Edit", "ComboBox", "CheckBox", "Button", "Text"):
-                continue
-            auto_id = c.element_info.automation_id or ""
-            if auto_id in NO_FILTRO:
-                continue
-            texto = c.window_text().replace("\n", " ")[:50]
-            print(f"   {tipo:<12} auto_id={auto_id!r:<26} texto={texto!r}")
-        except Exception:
-            continue
+def _pane(ventana, auto_id: str):
+    """Busca el Pane por auto_id (o por texto si no lo encuentra)."""
+    return capture_ui._buscar(ventana, auto_id)
 
 
-def escribir_fecha(ventana, fecha: str) -> bool:
-    """Intenta escribir la fecha en el primer campo Edit con pinta de fecha.
-
-    Estrategia: buscar Edits cuyo auto_id contenga 'dat', 'fec', 'date', 'dt';
-    si no hay, probar el primer Edit que no sea un filtro conocido.
-    """
-    candidatos = []
-    for c in ventana.descendants():
-        try:
-            if c.element_info.control_type != "Edit":
-                continue
-            auto_id = (c.element_info.automation_id or "").lower()
-            candidatos.append((auto_id, c))
-        except Exception:
-            continue
-    if not candidatos:
-        print("   [!] No encontre campos Edit para la fecha.")
+def _clic_pane(ventana, auto_id: str) -> bool:
+    """Hace clic en el pane de fecha (eso activa la casilla 'Desde'/'Hasta')."""
+    pane = _pane(ventana, auto_id)
+    if pane is None:
+        print(f"   [!] No encontre el pane {auto_id!r}.")
         return False
-
-    palabras = ("dat", "fec", "date", "dt", "hora", "time")
-    elegido = None
-    for auto_id, c in candidatos:
-        if any(p in auto_id for p in palabras):
-            elegido = (auto_id, c)
-            break
-    if elegido is None:
-        print(f"   [!] No identifique un campo de fecha entre: {[a for a, _ in candidatos]}")
-        print("       Usa --sin-buscar y escribe la fecha a mano para ver el resultado.")
-        return False
-
-    auto_id, c = elegido
     try:
-        c.set_focus()
-        c.set_text(fecha)
-        print(f"   (fecha {fecha!r} escrita en el campo {auto_id!r})")
+        capture_ui._clic(pane)
+        time.sleep(0.8)
+        print(f"   (clic en {auto_id!r} -> casilla activada)")
         return True
     except Exception as e:
-        print(f"   [!] No pude escribir la fecha en {auto_id!r}: {e}")
+        print(f"   [!] No pude hacer clic en {auto_id!r}: {e}")
+        return False
+
+
+def _escribir_fecha_pane(ventana, auto_id: str, fecha: str) -> bool:
+    """Escribe la fecha en el pane. Estrategia: clic, Ctrl+A, escribir, Tab."""
+    pane = _pane(ventana, auto_id)
+    if pane is None:
+        print(f"   [!] No encontre el pane {auto_id!r}.")
+        return False
+    try:
+        capture_ui._clic(pane)
+        time.sleep(0.4)
+        pane.type_keys("^a")
+        time.sleep(0.2)
+        pane.type_keys(fecha)
+        time.sleep(0.2)
+        pane.type_keys("{TAB}")
+        time.sleep(0.4)
+        print(f"   (fecha {fecha!r} escrita en {auto_id!r})")
+        return True
+    except Exception as e:
+        print(f"   [!] No pude escribir en {auto_id!r}: {e}")
         return False
 
 
@@ -157,7 +137,7 @@ def nombres_columnas(ventana) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fecha", default="", help="Fecha a filtrar (ej. 22/10/2026)")
+    ap.add_argument("--fecha", default="", help="Fecha a filtrar (ej. 22/10/2026). Vacio = la que ya tenga")
     ap.add_argument("--sin-menu", action="store_true", help="No navegar; usar la pantalla actual")
     ap.add_argument("--sin-buscar", action="store_true", help="No pulsar Buscar")
     args = ap.parse_args()
@@ -182,13 +162,19 @@ def main() -> int:
     else:
         print("[1] Navegacion por menu OMITIDA (--sin-menu).")
 
-    # [2] Fecha
-    if args.fecha:
-        print(f"\n[2] Escribiendo la fecha {args.fecha!r}...")
-        escribir_fecha(ventana, args.fecha)
+    # [2] Activar casillas de fecha (clic en los panes)
+    print("\n[2] Activando casillas de fecha (clic en los panes)...")
+    print("   (estos panes NO son CheckBox; el check se activa con el clic)")
+    _clic_pane(ventana, PANE_DESDE)
+    _clic_pane(ventana, PANE_HASTA)
 
-    # [3] Volcar filtros
-    volcar_filtros(ventana)
+    # [3] Escribir la fecha si se indico
+    if args.fecha:
+        print(f"\n[3] Escribiendo la fecha {args.fecha!r} en Desde y Hasta...")
+        _escribir_fecha_pane(ventana, PANE_DESDE, args.fecha)
+        _escribir_fecha_pane(ventana, PANE_HASTA, args.fecha)
+    else:
+        print("\n[3] Fecha OMITIDA: se usara la que la pantalla tenga por defecto.")
 
     # [4] Buscar
     if not args.sin_buscar:
@@ -228,11 +214,11 @@ def main() -> int:
     destino.write_text(texto, encoding="utf-8")
     print(f"   Guardado en: {destino}\n")
 
-    print("[7] Primeras 8 filas:")
-    for ln in lineas[:8]:
+    print("[7] Primeras 10 filas:")
+    for ln in lineas[:10]:
         print("   ", ln)
 
-    print("\n>>> PEGA EN EL CHAT: los filtros ([3]), las columnas ([5]) y las 8 filas ([7]).")
+    print("\n>>> PEGA EN EL CHAT: las columnas ([5]) y las 10 filas ([7]).")
     return 0
 
 

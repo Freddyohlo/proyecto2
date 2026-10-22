@@ -225,17 +225,26 @@ def _buscar_menuitem(texto: str):
 
 def ir_a_ccu_cuadratura(cfg: Config, ventana) -> None:
     """Navega el menu clasico de arriba: Aplicaciones > Informes/Etiquetas > CCU Cuadratura de Stock."""
+    ir_a_por_menu(cfg, ventana, [
+        ("Aplicaciones", "aplicaciones"),
+        ("Informes/Etiquetas", "informes/etiquetas"),
+        ("CCU Cuadratura de Stock", "cuadratura"),
+    ])
+
+
+def ir_a_por_menu(cfg: Config, ventana, ruta: list[tuple[str, str]]) -> None:
+    """Navega el menu clasico de arriba siguiendo `ruta`.
+
+    `ruta` es una lista de (nombre_legible, texto_a_buscar). Cada nivel se busca
+    como MenuItem por texto (sin distinguir mayusculas) y se hace clic.
+    """
     try:
         ventana.set_focus()
         time.sleep(0.5)
     except Exception:
         pass
 
-    for nivel, texto in (
-        ("Aplicaciones", "aplicaciones"),
-        ("Informes/Etiquetas", "informes/etiquetas"),
-        ("CCU Cuadratura de Stock", "cuadratura"),
-    ):
+    for nivel, texto in ruta:
         item = _buscar_menuitem(texto)
         if item is None:
             raise RuntimeError(f"No encontre el MenuItem {nivel!r} en el menu de arriba.")
