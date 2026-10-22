@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ titulo }} — {{ fecha }}</title>
+<style>
+  :root { --azul:#2563eb; --verde:#16a34a; --rojo:#dc2626; --gris:#475569; --borde:#e2e8f0; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0;
+         background:#f1f5f9; color:#0f172a; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--gris); font-size: 13px; margin-bottom: 18px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap: 12px;
+           margin-bottom: 18px; }
+  .card { background:#fff; border:1px solid var(--borde); border-radius:10px; padding:14px 16px; }
+  .card .lbl { font-size: 12px; color: var(--gris); text-transform: uppercase; letter-spacing:.03em; }
+  .card .val { font-size: 24px; font-weight: 700; margin-top: 4px; }
+  .card .val small { font-size: 13px; font-weight: 500; color: var(--gris); }
+  .alerta { padding: 12px 16px; border-radius:10px; margin-bottom: 18px; font-weight: 600; }
+  .alerta.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .alerta.warn { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+  .panel { background:#fff; border:1px solid var(--borde); border-radius:10px; padding:16px;
+           margin-bottom: 18px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; color:#0f172a; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 7px 9px; text-align: right; border-bottom: 1px solid var(--borde); }
+  th:first-child, td:first-child { text-align: left; }
+  th { background:#f8fafc; color:var(--gris); font-weight:600; }
+  tbody tr:hover { background:#f8fafc; }
+  .pie { color: var(--gris); font-size: 12px; text-align:center; margin-top: 8px; }
+  .bar { height: 8px; background:#e2e8f0; border-radius: 4px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background: var(--verde); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>{{ titulo }}</h1>
+  <div class="sub">Fecha: {{ fecha }} · Generado: {{ generado }}</div>
+
+  <div class="cards">
+    <div class="card"><div class="lbl">Pickeado</div>
+      <div class="val">{{ "{:,}".format(proy.total_cajas).replace(",", ".") }}
+        <small>/ {{ "{:,}".format(proy.meta).replace(",", ".") }} cajas</small></div></div>
+    <div class="card"><div class="lbl">Avance</div>
+      <div class="val">{{ proy.pct_avance }}%</div></div>
+    <div class="card"><div class="lbl">Ritmo</div>
+      <div class="val">{{ proy.tasa_actual }} <small>cajas/hora</small></div></div>
+    <div class="card"><div class="lbl">Termino estimado</div>
+      <div class="val">{{ proy.hora_termino or "—" }}</div></div>
+  </div>
+
+  <div class="bar" style="margin-bottom:18px">
+    <i style="width: {{ [proy.pct_avance, 100] | min }}%"></i>
+  </div>
+
+  <div class="alerta {{ 'warn' if proy.supera_limite else 'ok' }}">{{ proy.alerta }}</div>
+
+  <div class="panel">
+    <h2>Cajas por hora</h2>
+    {{ svg_barras | safe }}
+  </div>
+
+  <div class="panel">
+    <h2>Avance acumulado vs meta</h2>
+    {{ svg_linea | safe }}
+  </div>
+
+  <div class="panel">
+    <h2>Detalle por hora</h2>
+    <table>
+      <thead>
+        <tr><th>Hora</th><th>Cajas</th><th>Pickeadores</th><th>Cajas/pickeador</th>
+            <th>Viajes</th><th>Acumulado</th><th>% meta</th></tr>
+      </thead>
+      <tbody>
+        {% for f in filas %}
+        <tr>
+          <td>{{ f.hora }}</td>
+          <td>{{ f.cajas }}</td>
+          <td>{{ f.pickeadores }}</td>
+          <td>{{ f.cajas_por_pickeador }}</td>
+          <td>{{ f.viajes }}</td>
+          <td>{{ f.acumulado }}</td>
+          <td>{{ f.pct }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pie">Informe generado automaticamente desde Blue Yonder · CCU Caja Pickeada</div>
+</div>
+</body>
+</html>

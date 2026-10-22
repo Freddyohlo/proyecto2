@@ -367,3 +367,50 @@ def capturar(cfg: Config) -> str:
         raise RuntimeError("La grilla no trajo resultados (0 filas) tras pulsar Buscar.")
     print(f"   ({filas} filas en la grilla)")
     return copiar_grilla(cfg, ventana)
+
+
+# --------------------------------------------------------------------------
+# Captura de 'CCU Caja Pickeada' (informe de productividad)
+# --------------------------------------------------------------------------
+PANE_FECHA_DESDE = "fecha_desde"
+PANE_FECHA_HASTA = "fecha_hasta"
+RUTA_CAJA_PICKEADA = [
+    ("Aplicaciones", "aplicaciones"),
+    ("Informes/Etiquetas", "informes/etiquetas"),
+    ("CCU Caja Pickeada", "caja pickeada"),
+]
+
+
+def _clic_pane_fecha(ventana, auto_id: str) -> bool:
+    """Hace clic en el pane de fecha (activa la casilla 'Desde'/'Hasta')."""
+    pane = _buscar(ventana, auto_id)
+    if pane is None:
+        return False
+    try:
+        _clic(pane)
+        time.sleep(0.8)
+        return True
+    except Exception:
+        return False
+
+
+def capturar_caja_pickeada(cfg: Config, navegar: bool = True) -> str:
+    """Navega a 'CCU Caja Pickeada', activa las casillas de fecha y copia la grilla.
+
+    `navegar=False` usa la pantalla actual (util cuando ya estas en ella, porque
+    re-navegar puede resetear el filtro de fecha).
+    """
+    ventana = buscar_ventana_app()
+    if navegar:
+        ir_a_por_menu(cfg, ventana, RUTA_CAJA_PICKEADA)
+
+    # Activar casillas de fecha (son Pane dibujados a mano, no CheckBox)
+    _clic_pane_fecha(ventana, PANE_FECHA_DESDE)
+    _clic_pane_fecha(ventana, PANE_FECHA_HASTA)
+
+    pulsar_buscar(cfg, ventana)
+    filas = esperar_resultados(cfg, ventana)
+    if filas == 0:
+        raise RuntimeError("La grilla no trajo resultados (0 filas) tras pulsar Buscar.")
+    print(f"   ({filas} filas en la grilla)")
+    return copiar_grilla(cfg, ventana)
