@@ -9,7 +9,7 @@
   * { box-sizing: border-box; }
   body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0;
          background:#f1f5f9; color:#0f172a; }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 24px; }
+  .wrap { max-width: 1320px; margin: 0 auto; padding: 24px; }
   h1 { font-size: 22px; margin: 0 0 4px; }
   .sub { color: var(--gris); font-size: 13px; margin-bottom: 18px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px,1fr)); gap: 12px;
@@ -24,14 +24,18 @@
   .panel { background:#fff; border:1px solid var(--borde); border-radius:10px; padding:16px;
            margin-bottom: 18px; }
   .panel h2 { font-size: 15px; margin: 0 0 12px; }
-  table { width:100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 7px 9px; text-align: right; border-bottom: 1px solid var(--borde); }
+  table { width:100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--borde); }
   th:first-child, td:first-child { text-align: left; }
   th { background:#f8fafc; color:var(--gris); font-weight:600; }
   tbody tr:hover { background:#f8fafc; }
   .pie { color: var(--gris); font-size: 12px; text-align:center; margin-top: 8px; }
   .bar { height: 10px; background:#e2e8f0; border-radius: 5px; overflow:hidden; }
   .bar > i { display:block; height:100%; background: var(--verde); }
+
+  /* Grafico y tabla lado a lado; en pantallas angostas se apilan */
+  .dos-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .dos-col { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -61,38 +65,34 @@
 
   <div class="alerta {{ 'warn' if proy.supera_limite else 'ok' }}">{{ proy.alerta }}</div>
 
-  <div class="panel">
-    <h2>Cajas pickeadas por hora (hora real de trabajo)</h2>
-    {{ svg_barras | safe }}
-  </div>
+  <div class="dos-col">
+    <div class="panel">
+      <h2>Cajas pickeadas por hora</h2>
+      {{ svg_barras | safe }}
+    </div>
 
-  <div class="panel">
-    <h2>Avance acumulado vs meta</h2>
-    {{ svg_linea | safe }}
-  </div>
-
-  <div class="panel">
-    <h2>Detalle por hora</h2>
-    <table>
-      <thead>
-        <tr><th>Hora</th><th>Cajas</th><th>Pickeadores</th><th>Viajes</th>
-            <th>Cajas/pickeador</th><th>Cajas/viaje</th><th>Acumulado</th><th>% meta</th></tr>
-      </thead>
-      <tbody>
-        {% for f in filas %}
-        <tr>
-          <td>{{ f.hora }}</td>
-          <td>{{ f.cajas }}</td>
-          <td>{{ f.pickeadores }}</td>
-          <td>{{ f.viajes }}</td>
-          <td>{{ f.cajas_por_pickeador }}</td>
-          <td>{{ f.cajas_por_viaje }}</td>
-          <td>{{ f.acumulado }}</td>
-          <td>{{ f.pct }}%</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="panel">
+      <h2>Detalle por hora</h2>
+      <table>
+        <thead>
+          <tr><th>Hora</th><th>Cajas</th><th>Pick.</th><th>Viajes</th>
+              <th>Cajas/pick.</th><th>Acum.</th><th>% meta</th></tr>
+        </thead>
+        <tbody>
+          {% for f in filas %}
+          <tr>
+            <td>{{ f.hora }}</td>
+            <td>{{ f.cajas }}</td>
+            <td>{{ f.pickeadores }}</td>
+            <td>{{ f.viajes }}</td>
+            <td>{{ f.cajas_por_pickeador }}</td>
+            <td>{{ f.acumulado }}</td>
+            <td>{{ f.pct }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="pie">Generado automaticamente desde Blue Yonder · CCU Caja Pickeada</div>

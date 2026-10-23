@@ -229,19 +229,27 @@ def proyectar(
 # --------------------------------------------------------------------------
 # Graficos SVG (sin dependencias; funcionan offline)
 # --------------------------------------------------------------------------
-def _svg_barras(resumen: pd.DataFrame, ancho: int = 900, alto: int = 260) -> str:
+def _svg_barras(resumen: pd.DataFrame, ancho: int = 640, alto: int = 300) -> str:
+    """Barras de cajas por hora. Pensado para media columna (~600 px)."""
     if resumen.empty:
         return "<p>Sin datos</p>"
     etiquetas = resumen["etiqueta"].tolist()
     vals = resumen["cajas"].tolist()
     maxv = max(vals) or 1
     n = len(etiquetas)
-    m_izq, m_der, m_sup, m_inf = 52, 12, 18, 46
+    m_izq, m_der, m_sup, m_inf = 54, 10, 20, 54
     w, h = ancho - m_izq - m_der, alto - m_sup - m_inf
     paso = w / n
-    bw = paso * 0.68
+    bw = paso * 0.66
     p = [f'<svg viewBox="0 0 {ancho} {alto}" width="100%" height="{alto}" '
          f'xmlns="http://www.w3.org/2000/svg" role="img">']
+    # lineas guia horizontales + escala
+    for frac in (0, 0.25, 0.5, 0.75, 1.0):
+        yv = m_sup + h - frac * h
+        p.append(f'<line x1="{m_izq}" y1="{yv:.1f}" x2="{m_izq+w}" y2="{yv:.1f}" '
+                 f'stroke="#eef2f7"/>')
+        p.append(f'<text x="{m_izq-6}" y="{yv+3:.1f}" font-size="9" text-anchor="end" '
+                 f'fill="#94a3b8">{int(maxv*frac)}</text>')
     p.append(f'<line x1="{m_izq}" y1="{m_sup}" x2="{m_izq}" y2="{m_sup+h}" stroke="#cbd5e1"/>')
     p.append(f'<line x1="{m_izq}" y1="{m_sup+h}" x2="{m_izq+w}" y2="{m_sup+h}" stroke="#cbd5e1"/>')
     for i, (lab, v) in enumerate(zip(etiquetas, vals)):
@@ -253,45 +261,11 @@ def _svg_barras(resumen: pd.DataFrame, ancho: int = 900, alto: int = 260) -> str
         if v:
             p.append(f'<text x="{x+bw/2:.1f}" y="{y-3:.1f}" font-size="9" '
                      f'text-anchor="middle" fill="#334155">{v}</text>')
-        # etiqueta rotada si hay muchas horas
-        rot = -60 if n > 10 else 0
-        p.append(f'<text x="{x+bw/2:.1f}" y="{m_sup+h+14}" font-size="9" '
+        # etiqueta rotada cuando hay muchas horas (siempre en este layout)
+        rot = -60 if n > 7 else 0
+        p.append(f'<text x="{x+bw/2:.1f}" y="{m_sup+h+12}" font-size="9" '
                  f'text-anchor="{"end" if rot else "middle"}" fill="#475569" '
-                 f'transform="rotate({rot} {x+bw/2:.1f} {m_sup+h+14})">{lab}</text>')
-    p.append("</svg>")
-    return "".join(p)
-
-
-def _svg_linea(resumen: pd.DataFrame, meta: int, ancho: int = 900, alto: int = 260) -> str:
-    if resumen.empty:
-        return "<p>Sin datos</p>"
-    etiquetas = resumen["etiqueta"].tolist()
-    acum = resumen["cajas"].cumsum().tolist()
-    maxv = max(max(acum) if acum else 0, meta or 0) or 1
-    n = len(etiquetas)
-    m_izq, m_der, m_sup, m_inf = 52, 12, 18, 46
-    w, h = ancho - m_izq - m_der, alto - m_sup - m_inf
-    paso = w / max(n - 1, 1)
-
-    def px(i): return m_izq + i * paso
-    def py(v): return m_sup + h - (v / maxv) * h
-
-    p = [f'<svg viewBox="0 0 {ancho} {alto}" width="100%" height="{alto}" '
-         f'xmlns="http://www.w3.org/2000/svg" role="img">']
-    p.append(f'<line x1="{m_izq}" y1="{m_sup}" x2="{m_izq}" y2="{m_sup+h}" stroke="#cbd5e1"/>')
-    p.append(f'<line x1="{m_izq}" y1="{m_sup+h}" x2="{m_izq+w}" y2="{m_sup+h}" stroke="#cbd5e1"/>')
-    if meta:
-        ym = py(meta)
-        p.append(f'<line x1="{m_izq}" y1="{ym:.1f}" x2="{m_izq+w}" y2="{ym:.1f}" '
-                 f'stroke="#dc2626" stroke-dasharray="6 4"/>')
-        p.append(f'<text x="{m_izq+w}" y="{ym-4:.1f}" font-size="10" text-anchor="end" '
-                 f'fill="#dc2626">Meta {meta}</text>')
-    pts = " ".join(f"{px(i):.1f},{py(v):.1f}" for i, v in enumerate(acum))
-    p.append(f'<polyline points="{pts}" fill="none" stroke="#16a34a" stroke-width="2"/>')
-    for i, v in enumerate(acum):
-        p.append(f'<circle cx="{px(i):.1f}" cy="{py(v):.1f}" r="2.5" fill="#16a34a"/>')
-        p.append(f'<text x="{px(i):.1f}" y="{m_sup+h+14}" font-size="9" text-anchor="end" '
-                 f'fill="#475569" transform="rotate(-60 {px(i):.1f} {m_sup+h+14})">{etiquetas[i]}</text>')
+                 f'transform="rotate({rot} {x+bw/2:.1f} {m_sup+h+12})">{lab}</text>')
     p.append("</svg>")
     return "".join(p)
 
@@ -362,7 +336,6 @@ def generar_html(
         titulo=titulo, fecha=fecha, proy=proy, meta=meta,
         filas=tabla_para_mostrar(resumen, meta),
         svg_barras=_svg_barras(resumen),
-        svg_linea=_svg_linea(resumen, meta),
         generado=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
     destino.write_text(html, encoding="utf-8")
