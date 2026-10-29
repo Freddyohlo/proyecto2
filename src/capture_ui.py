@@ -416,6 +416,61 @@ def _copiar_por_rango_uia(grilla, filas: int) -> str:
         return ""
 
 
+def extraer_grilla_por_uia(ventana, max_filas: int = 20000, progreso_cada: int = 200) -> str:
+    """Respaldo INFALIBLE: lee las celdas de la grilla directamente por UIAutomation.
+
+    No depende del portapapeles ni del teclado (que algunas grillas DevExpress
+    ignoran). Es mas lento, pero funciona siempre que la grilla exponga sus celdas
+    como DataItem con sus textos.
+
+    Devuelve el contenido en formato TSV (una linea por fila).
+    """
+    grilla = grilla_principal(ventana)
+    if grilla is None:
+        raise RuntimeError("No encontre la grilla ('GridView:Parent=Control').")
+
+    # Recolecta celdas (DataItem) con su posicion para reconstruir filas/columnas
+    celdas = []
+    try:
+        for c in grilla.descendants():
+            try:
+                if c.element_info.control_type != "DataItem":
+                    continue
+                rect = c.rectangle()
+                celdas.append((rect.top, rect.left, c.window_text()))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    if not celdas:
+        raise RuntimeError("La grilla no expone celdas (DataItem) para extraer por UIA.")
+
+    # Agrupa por fila (mismo 'top') y ordena por 'left'
+    filas: dict[int, list[tuple[int, str]]] = {}
+    for top, left, texto in celdas:
+        # tolerancia: agrupa tops cercanos en la misma fila
+        clave = None
+        for k in filas:
+            if abs(k - top) <= 2:
+                clave = k
+                break
+        if clave is None:
+            clave = top
+            filas[clave] = []
+        filas[clave].append((left, texto))
+
+    lineas = []
+    for i, top in enumerate(sorted(filas)):
+        if i >= max_filas:
+            break
+        valores = [t for _, t in sorted(filas[top], key=lambda x: x[0])]
+        lineas.append("\t".join(v.strip() for v in valores))
+        if progreso_cada and i and i % progreso_cada == 0:
+            print(f"      ... {i} filas extraidas")
+    return "\n".join(lineas)
+
+
 def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
     """Copia la grilla de DATOS completa.
 
@@ -497,13 +552,22 @@ def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
               f"reintentando...)")
         time.sleep(1.5)
 
+    # Ultimo recurso: si el portapapeles no alcanza, leer las celdas por UIAutomation
+    if filas_esperadas > 0 and len(mejor.splitlines()) < filas_esperadas * 0.5:
+        print("   (el portapapeles no alcanza; extrayendo las celdas por UIAutomation...)")
+        try:
+            texto_uia = extraer_grilla_por_uia(ventana)
+            if len(texto_uia.splitlines()) > len(mejor.splitlines()):
+                print(f"   (extraccion UIA OK: {len(texto_uia.splitlines())} lineas)")
+                return texto_uia
+        except Exception as e:
+            print(f"   [!] La extraccion UIA tambien fallo: {e}")
+
     if mejor.strip():
         print(f"   [!] Se devuelve la mejor copia obtenida: "
               f"{len(mejor.splitlines())} lineas (esperadas {filas_esperadas}).")
-        print("       Si son pocas, corre tools/diagnosticar_copia_grilla.py para ver "
-              "que metodo funciona en esta pantalla.")
         return mejor
-    raise RuntimeError("El portapapeles quedo vacio tras varios intentos de Ctrl+A/Ctrl+C.")
+    raise RuntimeError("No se pudo copiar ni extraer la grilla.")
 
 
 # --------------------------------------------------------------------------

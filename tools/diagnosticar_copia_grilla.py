@@ -74,7 +74,7 @@ def main() -> int:
 
     # Cuantas filas tiene la grilla segun UIAutomation
     filas_uia = capture_ui._contar_filas(grilla)
-    print(f"Filas segun UIAutomation: {filas_uia} (esperadas: {args.esperadas or '?'})\\n")
+    print(f"Filas segun UIAutomation: {filas_uia} (esperadas: {args.esperadas or '?'})\n")
 
     resultados = []
     mejor_texto = ""
@@ -87,7 +87,7 @@ def main() -> int:
             mejor_lineas, mejor_texto = lineas, texto
         time.sleep(0.5)
 
-    print("\\n=== RESUMEN ===")
+    print("\n=== RESUMEN ===")
     objetivo = args.esperadas or filas_uia
     for nombre, lineas in sorted(resultados, key=lambda x: -x[1]):
         marca = "  <-- MEJOR" if lineas == mejor_lineas else ""
@@ -97,12 +97,12 @@ def main() -> int:
     if mejor_texto.strip():
         Path(args.guardar).parent.mkdir(parents=True, exist_ok=True)
         Path(args.guardar).write_text(mejor_texto, encoding="utf-8")
-        print(f"\\nMejor copia guardada en: {args.guardar} ({mejor_lineas} lineas)")
+        print(f"\nMejor copia guardada en: {args.guardar} ({mejor_lineas} lineas)")
         print("Primeras 3 lineas:")
         for ln in mejor_texto.splitlines()[:3]:
             print("   ", ln)
 
-    print("\\n>>> PEGA EN EL CHAT la tabla del RESUMEN (me dice que metodo usar).")
+    print("\n>>> PEGA EN EL CHAT la tabla del RESUMEN (me dice que metodo usar).")
     return 0
 
 
