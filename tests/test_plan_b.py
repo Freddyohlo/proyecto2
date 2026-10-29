@@ -181,3 +181,37 @@ def test_reposicion_con_formato_real_de_reabastecimiento():
     assert it.minimo == 160
     assert it.reponer == 168         # hasta el maximo
     assert it.cubre is True          # 900 >= 168
+
+
+# --------------------------------------------------------------------------
+# Extraccion UIA: agrupacion de celdas en filas y filtrado
+# --------------------------------------------------------------------------
+def test_filas_desde_celdas_agrupa_por_top():
+    from src import capture_ui as cu
+    celdas = [
+        (100, 10, "CD8000"), (100, 50, "000622"), (100, 90, "KEG-04"),
+        (120, 10, "CD8000"), (120, 50, "000700"), (120, 90, "KEG-05"),
+    ]
+    filas = cu._filas_desde_celdas(celdas)
+    assert filas == [["CD8000", "000622", "KEG-04"], ["CD8000", "000700", "KEG-05"]]
+
+
+def test_filas_desde_celdas_ordena_por_left():
+    from src import capture_ui as cu
+    # Celdas desordenadas: deben quedar por 'left'
+    celdas = [(100, 90, "TERCERO"), (100, 10, "PRIMERO"), (100, 50, "SEGUNDO")]
+    filas = cu._filas_desde_celdas(celdas)
+    assert filas == [["PRIMERO", "SEGUNDO", "TERCERO"]]
+
+
+def test_quitar_columna_numeros_quita_la_primera():
+    from src import capture_ui as cu
+    filas = [["0", "CD8000", "A"], ["1", "CD8000", "B"], ["2", "CD8000", "C"]]
+    assert cu._quitar_columna_numeros(filas) == [["CD8000", "A"], ["CD8000", "B"], ["CD8000", "C"]]
+
+
+def test_quitar_columna_numeros_no_quita_datos_reales():
+    from src import capture_ui as cu
+    # 168/160 son datos, no una secuencia 0,1,2 -> no se quita nada
+    filas = [["168", "KEG-04"], ["160", "KEG-05"], ["150", "KEG-06"]]
+    assert cu._quitar_columna_numeros(filas) == filas

@@ -416,12 +416,75 @@ def _copiar_por_rango_uia(grilla, filas: int) -> str:
         return ""
 
 
-def extraer_grilla_por_uia(ventana, max_filas: int = 20000, progreso_cada: int = 200) -> str:
+def _celdas_visibles(grilla) -> list[tuple[int, int, str]]:
+    """Celdas (DataItem) con posicion VALIDA: (top, left, texto).
+
+    Se descartan las celdas con rectangulo degenerado (0,0) o tamano cero: son
+    filas/columnas virtualizadas que aun no se dibujaron y ensucian la extraccion.
+    """
+    celdas = []
+    try:
+        for c in grilla.descendants():
+            try:
+                if c.element_info.control_type != "DataItem":
+                    continue
+                r = c.rectangle()
+                if r.width() <= 1 or r.height() <= 1:
+                    continue
+                if r.top <= 0 and r.left <= 0:
+                    continue
+                celdas.append((r.top, r.left, c.window_text()))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return celdas
+
+
+def _filas_desde_celdas(celdas: list[tuple[int, int, str]]) -> list[list[str]]:
+    """Agrupa celdas en filas por su 'top' (con tolerancia segun la altura)."""
+    if not celdas:
+        return []
+    alturas = sorted({t for t, _, _ in celdas})
+    tol = 6
+    grupos: list[tuple[int, list[tuple[int, str]]]] = []
+    for top, left, texto in sorted(celdas):
+        puesto = False
+        for i, (t, items) in enumerate(grupos):
+            if abs(t - top) <= tol:
+                items.append((left, texto))
+                puesto = True
+                break
+        if not puesto:
+            grupos.append((top, [(left, texto)]))
+    filas = []
+    for _, items in sorted(grupos, key=lambda g: g[0]):
+        filas.append([t.strip() for _, t in sorted(items, key=lambda x: x[0])])
+    return filas
+
+
+def _quitar_columna_numeros(filas: list[list[str]]) -> list[list[str]]:
+    """Quita la columna de numero de fila (0,1,2,...) si esta presente."""
+    if not filas or len(filas) < 3:
+        return filas
+    ancho = min(len(f) for f in filas)
+    for col in range(min(2, ancho)):
+        valores = [f[col] for f in filas if len(f) > col]
+        if not valores or not all(v.isdigit() for v in valores):
+            continue
+        nums = [int(v) for v in valores]
+        if nums == list(range(nums[0], nums[0] + len(nums))):
+            return [f[:col] + f[col + 1:] for f in filas]
+    return filas
+
+
+def extraer_grilla_por_uia(ventana, filas_esperadas: int = 0, max_filas: int = 20000,
+                           scroll: bool = True) -> str:
     """Respaldo INFALIBLE: lee las celdas de la grilla directamente por UIAutomation.
 
     No depende del portapapeles ni del teclado (que algunas grillas DevExpress
-    ignoran). Es mas lento, pero funciona siempre que la grilla exponga sus celdas
-    como DataItem con sus textos.
+    ignoran). Si la grilla virtualiza filas, se hace scroll y se acumulan las
+    filas nuevas (deduplicadas por su contenido).
 
     Devuelve el contenido en formato TSV (una linea por fila).
     """
@@ -429,46 +492,48 @@ def extraer_grilla_por_uia(ventana, max_filas: int = 20000, progreso_cada: int =
     if grilla is None:
         raise RuntimeError("No encontre la grilla ('GridView:Parent=Control').")
 
-    # Recolecta celdas (DataItem) con su posicion para reconstruir filas/columnas
-    celdas = []
-    try:
-        for c in grilla.descendants():
-            try:
-                if c.element_info.control_type != "DataItem":
-                    continue
-                rect = c.rectangle()
-                celdas.append((rect.top, rect.left, c.window_text()))
-            except Exception:
+    vistos: set[tuple] = set()
+    ordenadas: list[list[str]] = []
+
+    def acumular() -> int:
+        filas = _filas_desde_celdas(_celdas_visibles(grilla))
+        nuevos = 0
+        for f in filas:
+            clave = tuple(f)
+            if not any(v for v in f):
                 continue
-    except Exception:
-        pass
+            if clave in vistos:
+                continue
+            vistos.add(clave)
+            ordenadas.append(f)
+            nuevos += 1
+        return nuevos
 
-    if not celdas:
-        raise RuntimeError("La grilla no expone celdas (DataItem) para extraer por UIA.")
+    acumular()
+    print(f"      (celdas visibles: {len(ordenadas)} filas)")
 
-    # Agrupa por fila (mismo 'top') y ordena por 'left'
-    filas: dict[int, list[tuple[int, str]]] = {}
-    for top, left, texto in celdas:
-        # tolerancia: agrupa tops cercanos en la misma fila
-        clave = None
-        for k in filas:
-            if abs(k - top) <= 2:
-                clave = k
+    if scroll:
+        rondas_sin_avance = 0
+        for ronda in range(1, 200):
+            if filas_esperadas and len(ordenadas) >= filas_esperadas:
                 break
-        if clave is None:
-            clave = top
-            filas[clave] = []
-        filas[clave].append((left, texto))
+            try:
+                grilla.type_keys("{PGDN}")
+            except Exception:
+                break
+            time.sleep(0.6)
+            nuevos = acumular()
+            if ronda % 5 == 0 or nuevos == 0:
+                print(f"      ... {len(ordenadas)} filas ({ronda} paginas)")
+            if nuevos == 0:
+                rondas_sin_avance += 1
+                if rondas_sin_avance >= 3:
+                    break
+            else:
+                rondas_sin_avance = 0
 
-    lineas = []
-    for i, top in enumerate(sorted(filas)):
-        if i >= max_filas:
-            break
-        valores = [t for _, t in sorted(filas[top], key=lambda x: x[0])]
-        lineas.append("\t".join(v.strip() for v in valores))
-        if progreso_cada and i and i % progreso_cada == 0:
-            print(f"      ... {i} filas extraidas")
-    return "\n".join(lineas)
+    filas = _quitar_columna_numeros(ordenadas)[:max_filas]
+    return "\n".join("\t".join(f) for f in filas)
 
 
 def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
@@ -556,7 +621,7 @@ def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
     if filas_esperadas > 0 and len(mejor.splitlines()) < filas_esperadas * 0.5:
         print("   (el portapapeles no alcanza; extrayendo las celdas por UIAutomation...)")
         try:
-            texto_uia = extraer_grilla_por_uia(ventana)
+            texto_uia = extraer_grilla_por_uia(ventana, filas_esperadas=filas_esperadas)
             if len(texto_uia.splitlines()) > len(mejor.splitlines()):
                 print(f"   (extraccion UIA OK: {len(texto_uia.splitlines())} lineas)")
                 return texto_uia
