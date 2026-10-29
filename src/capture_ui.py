@@ -223,6 +223,34 @@ def _buscar_menuitem(texto: str):
     return None
 
 
+def _buscar_menuitem_exacto(texto: str):
+    """Busca un MenuItem por texto EXACTO (case-insensitive); si no, cae a 'contiene'.
+
+    Es clave cuando un nombre esta contenido en otro: p.ej. 'Reabastecimiento' vs
+    'Opciones de reabastecimiento'. Primero intenta la igualdad exacta.
+    """
+    from pywinauto import Desktop
+
+    objetivo = texto.strip().lower()
+    candidato_parcial = None
+    for w in Desktop(backend="uia").windows(top_level_only=True):
+        try:
+            for c in w.descendants():
+                try:
+                    if c.element_info.control_type != "MenuItem":
+                        continue
+                    t = c.window_text().strip().lower()
+                    if t == objetivo:
+                        return c
+                    if candidato_parcial is None and objetivo in t:
+                        candidato_parcial = c
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return candidato_parcial
+
+
 def ir_a_ccu_cuadratura(cfg: Config, ventana) -> None:
     """Navega el menu clasico de arriba: Aplicaciones > Informes/Etiquetas > CCU Cuadratura de Stock."""
     ir_a_por_menu(cfg, ventana, [
@@ -236,7 +264,9 @@ def ir_a_por_menu(cfg: Config, ventana, ruta: list[tuple[str, str]]) -> None:
     """Navega el menu clasico de arriba siguiendo `ruta`.
 
     `ruta` es una lista de (nombre_legible, texto_a_buscar). Cada nivel se busca
-    como MenuItem por texto (sin distinguir mayusculas) y se hace clic.
+    como MenuItem (primero por texto EXACTO y luego por coincidencia parcial) y se
+    hace clic. El match exacto evita confundir 'Reabastecimiento' con
+    'Opciones de reabastecimiento'.
     """
     try:
         ventana.set_focus()
@@ -245,7 +275,7 @@ def ir_a_por_menu(cfg: Config, ventana, ruta: list[tuple[str, str]]) -> None:
         pass
 
     for nivel, texto in ruta:
-        item = _buscar_menuitem(texto)
+        item = _buscar_menuitem_exacto(texto)
         if item is None:
             raise RuntimeError(f"No encontre el MenuItem {nivel!r} en el menu de arriba.")
         item.click_input()
