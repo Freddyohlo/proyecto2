@@ -416,6 +416,25 @@ def _copiar_por_rango_uia(grilla, filas: int) -> str:
         return ""
 
 
+def _texto_celda(c) -> str:
+    """Texto de una celda, probando varias fuentes (window_text suele venir vacio)."""
+    for fuente in ("window_text", "name", "value", "legacy"):
+        try:
+            if fuente == "window_text":
+                t = c.window_text()
+            elif fuente == "name":
+                t = c.element_info.name
+            elif fuente == "value":
+                t = c.iface_value.CurrentValue
+            else:
+                t = c.legacy_properties().get("Value", "")
+            if t and str(t).strip():
+                return str(t).strip()
+        except Exception:
+            continue
+    return ""
+
+
 def _celdas_visibles(grilla) -> list[tuple[int, int, str]]:
     """Celdas (DataItem) con posicion VALIDA: (top, left, texto).
 
@@ -433,7 +452,7 @@ def _celdas_visibles(grilla) -> list[tuple[int, int, str]]:
                     continue
                 if r.top <= 0 and r.left <= 0:
                     continue
-                celdas.append((r.top, r.left, c.window_text()))
+                celdas.append((r.top, r.left, _texto_celda(c)))
             except Exception:
                 continue
     except Exception:
@@ -478,13 +497,13 @@ def _quitar_columna_numeros(filas: list[list[str]]) -> list[list[str]]:
     return filas
 
 
-def extraer_grilla_por_uia(ventana, filas_esperadas: int = 0, max_filas: int = 20000,
-                           scroll: bool = True) -> str:
+def extraer_grilla_por_uia(ventana, filas_esperadas: int = 0, max_filas: int = 50000,
+                           max_paginas: int = 500) -> str:
     """Respaldo INFALIBLE: lee las celdas de la grilla directamente por UIAutomation.
 
     No depende del portapapeles ni del teclado (que algunas grillas DevExpress
-    ignoran). Si la grilla virtualiza filas, se hace scroll y se acumulan las
-    filas nuevas (deduplicadas por su contenido).
+    ignoran). Si la grilla pagina (muestra N filas por pantalla), se avanza con
+    PgDn / Ctrl+PgDn acumulando las filas nuevas (deduplicadas por contenido).
 
     Devuelve el contenido en formato TSV (una linea por fila).
     """
@@ -499,9 +518,9 @@ def extraer_grilla_por_uia(ventana, filas_esperadas: int = 0, max_filas: int = 2
         filas = _filas_desde_celdas(_celdas_visibles(grilla))
         nuevos = 0
         for f in filas:
-            clave = tuple(f)
             if not any(v for v in f):
                 continue
+            clave = tuple(f)
             if clave in vistos:
                 continue
             vistos.add(clave)
@@ -509,31 +528,71 @@ def extraer_grilla_por_uia(ventana, filas_esperadas: int = 0, max_filas: int = 2
             nuevos += 1
         return nuevos
 
-    acumular()
-    print(f"      (celdas visibles: {len(ordenadas)} filas)")
+    base = acumular()
+    print(f"      (pagina 1: {base} filas nuevas; total {len(ordenadas)})")
 
-    if scroll:
-        rondas_sin_avance = 0
-        for ronda in range(1, 200):
-            if filas_esperadas and len(ordenadas) >= filas_esperadas:
-                break
+    sin_avance = 0
+    for pagina in range(2, max_paginas + 1):
+        if filas_esperadas and len(ordenadas) >= filas_esperadas:
+            break
+        avanzado = False
+        for tecla in ("{PGDN}", "^{PGDN}", "{DOWN}"):
             try:
-                grilla.type_keys("{PGDN}")
+                grilla.type_keys(tecla)
             except Exception:
-                break
-            time.sleep(0.6)
+                continue
+            time.sleep(0.8)
             nuevos = acumular()
-            if ronda % 5 == 0 or nuevos == 0:
-                print(f"      ... {len(ordenadas)} filas ({ronda} paginas)")
-            if nuevos == 0:
-                rondas_sin_avance += 1
-                if rondas_sin_avance >= 3:
-                    break
-            else:
-                rondas_sin_avance = 0
+            if nuevos > 0:
+                avanzado = True
+                break
+        if pagina % 5 == 0 or not avanzado:
+            print(f"      (pagina {pagina}: total {len(ordenadas)} filas)")
+        if not avanzado:
+            sin_avance += 1
+            if sin_avance >= 3:
+                break
+        else:
+            sin_avance = 0
 
     filas = _quitar_columna_numeros(ordenadas)[:max_filas]
     return "\n".join("\t".join(f) for f in filas)
+
+
+def copiar_grilla_pyautogui(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
+    """Copia la grilla con teclas REALES del sistema (pyautogui / SendInput).
+
+    Las grillas DevExpress ignoran los mensajes de teclado de pywinauto, pero SI
+    responden al input real del sistema. Se hace clic en la grilla, Ctrl+A y Ctrl+C.
+    """
+    try:
+        import pyautogui
+    except ImportError:
+        raise RuntimeError("pyautogui no instalado (pip install pyautogui)")
+    grilla = grilla_principal(ventana)
+    if grilla is None:
+        raise RuntimeError("No encontre la grilla.")
+    mejor = ""
+    for intento in range(1, 4):
+        pyperclip.copy("")
+        try:
+            grilla.click_input()
+            time.sleep(0.6)
+            pyautogui.hotkey("ctrl", "a")
+            time.sleep(0.8)
+            pyautogui.hotkey("ctrl", "c")
+        except Exception:
+            pass
+        time.sleep(cfg.app.espera_ui)
+        texto = pyperclip.paste()
+        if len(texto.splitlines()) > len(mejor.splitlines()):
+            mejor = texto
+        if texto.strip() and (filas_esperadas <= 0
+                              or len(texto.splitlines()) >= filas_esperadas * 0.5):
+            print(f"   (copia pyautogui OK: {len(texto.splitlines())} lineas)")
+            return texto
+        print(f"   (pyautogui intento {intento}: {len(texto.splitlines())} lineas)")
+    return mejor
 
 
 def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
@@ -603,6 +662,16 @@ def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
         return len(texto.splitlines()) >= max(filas_esperadas * 0.5, 1)
 
     mejor = ""
+    # 0) Primero: teclas REALES del sistema (DevExpress las respeta)
+    try:
+        texto_real = copiar_grilla_pyautogui(cfg, ventana, filas_esperadas)
+        if len(texto_real.splitlines()) > len(mejor.splitlines()):
+            mejor = texto_real
+        if _suficiente(texto_real):
+            return texto_real
+    except Exception as e:
+        print(f"   (pyautogui no disponible: {e})")
+
     for ronda in range(1, 4):
         for estrategia in ("D", "E", "A", "B", "C", "F", "G", "H"):
             texto = _copiar_con(estrategia)
