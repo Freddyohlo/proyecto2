@@ -13,13 +13,16 @@ picking, no hay recepción. Este sistema replica la operación **offline**.
 
 ## 2. Las 5 fuentes de datos
 
-| # | Fuente | Qué aporta | Estado |
-|---|--------|-----------|--------|
-| 1 | **Cuadratura de Stock** (con "Detalle") | Stock real por ubicación + lote + vencimiento (FEFO) | ✅ captura funcionando |
-| 2 | **Operaciones de reabastecimiento** | Mínimo y máximo por ubicación | ✅ columnas mapeadas |
-| 3 | **Mantenimiento de ubicaciones** | Capacidad máx/usada/pendiente, tipo, zona, recogible, reabastecimiento | 🟡 pantalla encontrada, copiado en ajuste |
-| 4 | **TRUCK** (programa externo) | La **VENTA** = demanda = qué se necesita | ⏳ falta archivo de ejemplo |
-| 5 | **En tránsito / Recepción esperada** | Mercadería que viene en camino | ⏳ falta archivo de ejemplo |
+| # | Fuente | Qué aporta | Origen | Estado |
+|---|--------|-----------|--------|--------|
+| 1 | **Cuadratura de Stock** (con "Detalle") | Stock real por ubicación + lote + vencimiento (FEFO) | Blue Yonder | ✅ captura funcionando |
+| 2 | **Operaciones de reabastecimiento** | Mínimo y máximo por ubicación | Blue Yonder | ✅ columnas mapeadas |
+| 3 | **Mantenimiento de ubicaciones** | Capacidad máx/usada/pendiente, tipo, zona, recogible, reabastecimiento | Blue Yonder | 🟡 pantalla encontrada, copiado en ajuste |
+| 4 | **TRUCK** (programa externo) | La **VENTA** = demanda = qué se necesita | Externo (TRUCK) | ⏳ falta archivo de ejemplo |
+| 5 | **Mercadería en tránsito** (con **nº de OCA**) | Lo que viene en camino (OC de compra) | **SAP** | ⏳ falta archivo de ejemplo |
+
+> ⚠️ **Importante:** las fuentes 4 y 5 son **EXTERNAS** (no se capturan de Blue Yonder).
+> La mercadería en tránsito viene de **SAP**, con el **número de OCA** (orden de compra).
 
 ### Rutas de menú en Blue Yonder (confirmadas)
 - Cuadratura: `Aplicaciones > Informes/Etiquetas > CCU Cuadratura de Stock`
@@ -76,7 +79,8 @@ se puede abastecer. Detecta quiebres antes de que ocurran.
 - La **capacidad** de la ubicación valida que quepa
 
 ### 3.4 Recepción (módulo nuevo)
-- **En tránsito**: lo que viene (OC, SKU, cantidad, ETA)
+- **En tránsito**: lo que viene. **Origen: SAP**, identificado por el **nº de OCA**
+  (orden de compra). Aporta: OCA, SKU, cantidad esperada, ETA/proveedor.
 - **Recepción**: lo que llegó (cantidad, lote, vencimiento, estado, faltante/sobrante)
 - **Ubicación**: dónde ponerlo (sugerida por capacidad + mín/máx)
 - **Actualización**: entra al stock local → el picking ya lo ve
@@ -150,11 +154,13 @@ SQLite local (`data/plan_b.sqlite`). Tablas previstas:
 
 ### Archivos que enviará el usuario
 - [ ] Archivo tipo de **TRUCK** (la venta / demanda)
-- [ ] Archivo tipo de **mercadería en tránsito**
+- [ ] Archivo tipo de **mercadería en tránsito** (de **SAP**, con **nº de OCA**)
 
 ### Definiciones
 - [ ] Flujo físico de recepción (andén → conteo → ubicación)
 - [ ] ¿El tránsito se sabe con anticipación (OC/ETA) o al llegar?
+- [ ] ¿Cómo se obtiene el archivo de SAP? (export manual, reporte, carpeta compartida)
+- [ ] ¿El nº de OCA sirve para cruzar tránsito ↔ recepción real?
 - [ ] ¿Quién decide dónde ubicar?
 - [ ] ¿Se registra lote/vencimiento al recibir?
 - [ ] Cómo se reingresan los datos al volver el sistema
