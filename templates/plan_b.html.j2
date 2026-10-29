@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan B — Contingencia Blue Yonder</title>
+<style>
+  :root { --azul:#2563eb; --verde:#16a34a; --rojo:#dc2626; --gris:#475569; --borde:#e2e8f0; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0;
+         background:#f1f5f9; color:#0f172a; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--gris); font-size: 13px; margin-bottom: 18px; }
+  .banner { background:#fef3c7; border:1px solid #fcd34d; color:#92400e; padding:12px 16px;
+            border-radius:10px; margin-bottom:18px; font-weight:600; }
+  .cards { display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:12px;
+           margin-bottom:18px; }
+  .card { background:#fff; border:1px solid var(--borde); border-radius:10px; padding:14px 16px; }
+  .card .lbl { font-size:11px; color:var(--gris); text-transform:uppercase; letter-spacing:.04em; }
+  .card .val { font-size:23px; font-weight:700; margin-top:4px; }
+  .panel { background:#fff; border:1px solid var(--borde); border-radius:10px; padding:16px;
+           margin-bottom:18px; }
+  .panel h2 { font-size:15px; margin:0 0 12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { padding:7px 9px; text-align:right; border-bottom:1px solid var(--borde); }
+  th:first-child, td:first-child, td:nth-child(2), td:nth-child(3) { text-align:left; }
+  th { background:#f8fafc; color:var(--gris); font-weight:600; }
+  tbody tr:hover { background:#f8fafc; }
+  tr.alerta-fila { background:#fef2f2; }
+  .vacio { color:var(--gris); font-style:italic; }
+  .pie { color:var(--gris); font-size:12px; text-align:center; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Plan B — Contingencia Blue Yonder</h1>
+  <div class="sub">Inventario offline · Generado: {{ generado }}</div>
+
+  <div class="banner">⚠️ Modo contingencia: datos del último inventario capturado (no en vivo)</div>
+
+  <div class="cards">
+    <div class="card"><div class="lbl">Cajas en stock</div>
+      <div class="val">{{ "{:,}".format(total_cajas).replace(",", ".") }}</div></div>
+    <div class="card"><div class="lbl">Ubicaciones</div><div class="val">{{ n_ubic }}</div></div>
+    <div class="card"><div class="lbl">SKUs</div><div class="val">{{ n_sku }}</div></div>
+    <div class="card"><div class="lbl">Lotes (LPN)</div><div class="val">{{ n_lotes }}</div></div>
+    <div class="card"><div class="lbl">Reposiciones</div>
+      <div class="val">{{ n_repos }}{% if n_repos_sin_cubrir %} <small style="color:#dc2626">({{ n_repos_sin_cubrir }} sin stock)</small>{% endif %}</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Stock por área</h2>
+    <table>
+      <thead><tr><th>Área</th><th>Ubicaciones</th><th>Cantidad</th></tr></thead>
+      <tbody>
+        {% for a in areas %}
+        <tr><td>{{ a.area }}</td><td>{{ a.ubicaciones }}</td><td>{{ a.cantidad }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Reposición sugerida (ubicaciones bajo el mínimo)</h2>
+    {{ tabla_reposicion | safe }}
+  </div>
+
+  <div class="pie">Generado por el Plan B · datos de CCU Cuadratura de Stock (Detalle)</div>
+</div>
+</body>
+</html>
