@@ -140,3 +140,44 @@ def test_reposicion_cubre_cuando_almacen_alcanza():
     items = mm.calcular_reposicion(stock, m)
     assert len(items) == 1
     assert items[0].cubre is True
+
+
+# --------------------------------------------------------------------------
+# Formato REAL de 'Operaciones de reabastecimiento' (18 columnas)
+# --------------------------------------------------------------------------
+# Fila real de ejemplo del PC del usuario
+REAB_FILA = ("CD8000\t000622\tKEG-04\tZM PICKING\tDisponible\tUnchecked\t168\t160\t0\t"
+             "Unchecked\t28/10/2026 03:06:29\tRSUAREZ\tRCF00006U3\tUnchecked\t100\t100\t0\tZM-PICK")
+
+
+def test_leer_reabastecimiento_columnas_reales():
+    m = mm.leer_reabastecimiento(REAB_FILA + "\n")
+    assert len(m.dataframe) == 1
+    fila = m.dataframe.iloc[0]
+    assert fila["sku"] == "000622"
+    assert fila["ubicacion"] == "KEG-04"
+    assert fila["maximo"] == 168     # 'Máximo de unidades' (col 7)
+    assert fila["minimo"] == 160     # 'Mínimo de unidades' (col 8)
+
+
+def test_reabastecimiento_descarta_basura():
+    m = mm.leer_reabastecimiento(REAB_FILA + "\nbasura\n" + REAB_FILA + "\n")
+    assert len(m.dataframe) == 2
+
+
+def test_reposicion_con_formato_real_de_reabastecimiento():
+    # Ubicacion KEG-04 con 100 en picking (< min 160) y 900 en almacen
+    stock_tsv = "\n".join([
+        _fila("AREA PICKING", "KEG-04", "000622", "L1", 100),
+        _fila("AREA ALMACENAMIENTO", "A-1", "000622", "L2", 900),
+    ]) + "\n"
+    stock = inv.leer_detalle(stock_tsv)
+    m = mm.leer_reabastecimiento(REAB_FILA + "\n")
+    items = mm.calcular_reposicion(stock, m)
+    assert len(items) == 1
+    it = items[0]
+    assert it.ubicacion == "KEG-04"
+    assert it.stock_actual == 100
+    assert it.minimo == 160
+    assert it.reponer == 168         # hasta el maximo
+    assert it.cubre is True          # 900 >= 168

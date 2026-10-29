@@ -59,14 +59,21 @@ def cmd_cargar(args) -> int:
 
 def cmd_minmax(args) -> int:
     if not args.archivo:
-        raise SystemExit("Indica --archivo con el TSV/CSV de minimos y maximos.")
-    m = mm.leer_minmax_archivo(
-        args.archivo,
-        col_ubicacion=args.col_ubicacion,
-        col_sku=args.col_sku,
-        col_minimo=args.col_minimo,
-        col_maximo=args.col_maximo,
-    )
+        raise SystemExit("Indica --archivo con el TSV de reabastecimiento o de minimos/maximos.")
+    if args.formato == "reabastecimiento":
+        # Formato real de la pantalla 'Operaciones de reabastecimiento'
+        m = mm.cargar_reabastecimiento(args.archivo)
+    else:
+        m = mm.leer_minmax_archivo(
+            args.archivo,
+            col_ubicacion=args.col_ubicacion,
+            col_sku=args.col_sku,
+            col_minimo=args.col_minimo,
+            col_maximo=args.col_maximo,
+        )
+    if m.dataframe.empty:
+        print("[!] No se leyeron registros. Revisa el archivo o el --formato.")
+        return 1
     ruta = m.guardar(args.db)
     print(f"{len(m.dataframe)} registros de minimos/maximos guardados en: {ruta.resolve()}")
     print(m.dataframe.head(8).to_string(index=False))
@@ -155,6 +162,10 @@ def main() -> int:
 
     p = sub.add_parser("minmax", help="Carga minimos/maximos")
     p.add_argument("--archivo", required=True)
+    p.add_argument("--formato", default="reabastecimiento",
+                   choices=["reabastecimiento", "generico"],
+                   help="'reabastecimiento' = TSV de la pantalla de reabastecimiento "
+                        "(18 columnas); 'generico' = TSV/CSV con columnas configurables")
     p.add_argument("--col-ubicacion", default="ubicacion")
     p.add_argument("--col-sku", default="sku")
     p.add_argument("--col-minimo", default="minimo")

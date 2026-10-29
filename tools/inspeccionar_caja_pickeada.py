@@ -201,7 +201,7 @@ def main() -> int:
     # [6] Copiar
     print("\n[6] Copiando la grilla (Ctrl+A/Ctrl+C)...")
     try:
-        texto = capture_ui.copiar_grilla(cfg, ventana)
+        texto = capture_ui.copiar_grilla(cfg, ventana, filas_esperadas=filas)
     except Exception as e:
         print(f"   [!] No se pudo copiar: {e}")
         return 1

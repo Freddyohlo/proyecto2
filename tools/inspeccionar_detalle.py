@@ -253,6 +253,8 @@ def main() -> int:
     else:
         print("[1] Navegacion por menu OMITIDA (--sin-menu).")
 
+    filas = 0
+
     # [2] Seleccionar area
     etiqueta_area = "TODAS las areas (vacio)" if area == "" else repr(area)
     print(f"\n[2] Seleccionando area {etiqueta_area} en el combo {COMBO_AREA!r}...")
@@ -293,7 +295,7 @@ def main() -> int:
     # [6] Copiar grilla
     print("\n[6] Copiando la grilla (Ctrl+A/Ctrl+C)...")
     try:
-        texto = capture_ui.copiar_grilla(cfg, ventana)
+        texto = capture_ui.copiar_grilla(cfg, ventana, filas_esperadas=filas)
     except Exception as e:
         print(f"   [!] No se pudo copiar: {e}")
         return 1

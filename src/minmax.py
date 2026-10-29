@@ -3,9 +3,33 @@
 La cuadratura de stock dice CUANTO HAY. Esta parte dice CUANTO DEBERIA HABER
 (minimo y maximo por ubicacion de picking) y calcula QUE REPONER.
 
-Los minimos/maximos se cargan desde un archivo (TSV/CSV) cuya pantalla de origen
-en Blue Yonder esta por confirmar. Por eso el mapeo de columnas es configurable:
-se indican los nombres de las columnas de entrada con --col-*.
+FUENTE DE MIN/MAX (confirmada 2026-10-29):
+  Pantalla Blue Yonder: Aplicaciones > Reabastecimiento > Operaciones de reabastecimiento
+  (herramienta: tools/inspeccionar_reabastecimiento.py -> data/reabastecimiento_<fecha>.tsv)
+  Columnas reales (18):
+   1. Id. de almacén              (wh_id)     -> CD8000
+   2. Número de artículo          (prtnum)    -> SKU
+   3. Ubicación                   (stoloc)    -> KEG-04
+   4. Zona de movimiento          (movzone)   -> ZM PICKING
+   5. Estado de inventario        (invsts)    -> Disponible
+   6. Porcentaje                  (pctflg)
+   7. Máximo de unidades          (maxunt)    -> 🔑 MÁXIMO
+   8. Mínimo de unidades          (minunt)    -> 🔑 MÍNIMO
+   9. Máximo de ubicaciones para artículo (maxloc)
+  10. Completo                    (cmpflg)
+  11. Último intento de reabastecimiento
+  12. Última modificación de
+  13. Número de reabastecimiento
+  14. Porcentaje de incremento    (inc_pct_flg)
+  15. Unidad de incremento        (inc_unt)
+  16. Porcentaje de liberación    (rls_pct)
+  17. is_purged
+  18. Código de zona de movimiento (movzone code) -> ZM-PICK
+
+  Fila real de ejemplo:
+  CD8000 | 000622 | KEG-04 | ZM PICKING | Disponible | Unchecked | 168 | 160 | 0 |
+  Unchecked | 28/10/2026 03:06:29 | RSUAREZ | RCF00006U3 | Unchecked | 100 | 100 | 0 | ZM-PICK
+  => SKU 000622, ubicacion KEG-04, MAX=168, MIN=160
 
 Reglas de negocio (confirmadas):
   - Se dispara cuando la ubicacion de picking baja del MINIMO.
@@ -22,6 +46,19 @@ from pathlib import Path
 import pandas as pd
 
 from . import inventario as inv
+
+# Columnas reales de la grilla de reabastecimiento (en orden)
+COLUMNAS_REAB = [
+    "wh_id", "sku", "ubicacion", "zona_movimiento", "invsts", "pctflg",
+    "maximo", "minimo", "maxloc", "cmpflg", "ultimo_intento", "ultima_mod",
+    "num_reab", "inc_pct_flg", "inc_unt", "rls_pct", "is_purged", "movzone_cod",
+]
+
+# Indices (0-based) de las columnas que nos importan
+IDX_SKU = 1
+IDX_UBICACION = 2
+IDX_MAXIMO = 6
+IDX_MINIMO = 7
 
 
 @dataclass
@@ -46,6 +83,38 @@ class MinMax:
         return MinMax(df)
 
 
+def leer_reabastecimiento(texto: str) -> MinMax:
+    """Lee el TSV de 'Operaciones de reabastecimiento' (18 columnas) -> MinMax.
+
+    Normaliza filas cortas rellenando al final, y tipa minimo/maximo a entero.
+    """
+    registros: list[list[str]] = []
+    n = len(COLUMNAS_REAB)
+    for ln in texto.splitlines():
+        if not ln.strip():
+            continue
+        celdas = [c.strip() for c in ln.split("\t")]
+        if len(celdas) < 8:  # al menos hasta el minimo
+            continue
+        if len(celdas) < n:
+            celdas = celdas + [""] * (n - len(celdas))
+        registros.append(celdas[:n])
+
+    if not registros:
+        return MinMax(pd.DataFrame(columns=["ubicacion", "sku", "minimo", "maximo"]))
+
+    df = pd.DataFrame(registros, columns=COLUMNAS_REAB)
+    out = pd.DataFrame({
+        "ubicacion": df["ubicacion"].astype(str).str.strip(),
+        "sku": df["sku"].astype(str).str.strip(),
+        "minimo": pd.to_numeric(df["minimo"], errors="coerce").fillna(0).astype(int),
+        "maximo": pd.to_numeric(df["maximo"], errors="coerce").fillna(0).astype(int),
+    })
+    # Quita filas sin ubicacion (encabezados o basura)
+    out = out[out["ubicacion"] != ""].reset_index(drop=True)
+    return MinMax(out)
+
+
 def leer_minmax(
     texto: str,
     col_ubicacion: str = "ubicacion",
@@ -54,9 +123,9 @@ def leer_minmax(
     col_maximo: str = "maximo",
     separador: str = "\t",
 ) -> MinMax:
-    """Lee el archivo de minimos/maximos y normaliza las columnas.
+    """Lee un archivo generico de minimos/maximos (mapeo de columnas configurable).
 
-    Acepta TSV o CSV. Las columnas de entrada se indican por nombre (case-insensitive).
+    Acepta TSV o CSV. Util si el formato cambia o viene de otra fuente.
     """
     import io
 
@@ -86,6 +155,11 @@ def leer_minmax_archivo(ruta: str | Path, **kwargs) -> MinMax:
     if separador is None:
         separador = "," if ruta.suffix.lower() == ".csv" else "\t"
     return leer_minmax(ruta.read_text(encoding="utf-8"), separador=separador, **kwargs)
+
+
+def cargar_reabastecimiento(ruta: str | Path) -> MinMax:
+    """Carga el TSV de la pantalla de reabastecimiento (formato real de Blue Yonder)."""
+    return leer_reabastecimiento(Path(ruta).read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------

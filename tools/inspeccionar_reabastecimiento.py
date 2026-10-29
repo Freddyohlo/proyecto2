@@ -200,6 +200,7 @@ def main() -> int:
         print("[1] Navegacion por menu OMITIDA (--sin-menu).")
 
     volcar_filtros(ventana)
+    filas = 0
 
     if not args.sin_buscar:
         print("\n[2] Pulsando 'Buscar' y esperando resultados...")
@@ -223,7 +224,7 @@ def main() -> int:
 
     print("\n[4] Copiando la grilla (Ctrl+A/Ctrl+C)...")
     try:
-        texto = capture_ui.copiar_grilla(cfg, ventana)
+        texto = capture_ui.copiar_grilla(cfg, ventana, filas_esperadas=filas)
     except Exception as e:
         print(f"   [!] No se pudo copiar: {e}")
         return 1

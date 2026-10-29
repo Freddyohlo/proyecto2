@@ -315,11 +315,7 @@ def pulsar_buscar(cfg: Config, ventana) -> None:
     time.sleep(cfg.app.espera_ui)
 
 
-def _filas_grilla(ventana) -> int:
-    """Cuenta las filas (DataItem) que tiene la grilla ahora."""
-    grilla = _buscar(ventana, GRILLA, control_type="Table") or _buscar(ventana, GRILLA)
-    if grilla is None:
-        return 0
+def _contar_filas(grilla) -> int:
     contador = 0
     try:
         for c in grilla.descendants():
@@ -331,6 +327,44 @@ def _filas_grilla(ventana) -> int:
     except Exception:
         return 0
     return contador
+
+
+def _todas_las_grillas(ventana) -> list:
+    """Todas las tablas con el auto_id de la grilla de datos."""
+    encontradas = []
+    for c in ventana.descendants():
+        try:
+            if c.element_info.control_type != "Table":
+                continue
+            if c.element_info.automation_id != GRILLA:
+                continue
+            encontradas.append(c)
+        except Exception:
+            continue
+    return encontradas
+
+
+def grilla_principal(ventana):
+    """Devuelve la grilla de DATOS (la que tiene mas filas).
+
+    En varias pantallas de Blue Yonder hay mas de una tabla con el mismo auto_id:
+    una pequena (filtros/encabezado) y la grande de resultados. Elegir la primera
+    a ciegas copia la tabla equivocada; por eso se elige la de mas filas.
+    """
+    grillas = _todas_las_grillas(ventana)
+    if not grillas:
+        return _buscar(ventana, GRILLA, control_type="Table") or _buscar(ventana, GRILLA)
+    if len(grillas) == 1:
+        return grillas[0]
+    return max(grillas, key=_contar_filas)
+
+
+def _filas_grilla(ventana) -> int:
+    """Cuenta las filas (DataItem) que tiene la grilla de datos ahora."""
+    grilla = grilla_principal(ventana)
+    if grilla is None:
+        return 0
+    return _contar_filas(grilla)
 
 
 def esperar_resultados(cfg: Config, ventana, timeout: float = 60.0) -> int:
@@ -347,36 +381,65 @@ def esperar_resultados(cfg: Config, ventana, timeout: float = 60.0) -> int:
     return filas
 
 
-def copiar_grilla(cfg: Config, ventana) -> str:
-    """Copia la grilla completa.
+def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
+    """Copia la grilla de DATOS completa.
 
-    Estrategia validada en el PC del usuario: clic en la grilla, HOME para
-    asegurar el foco dentro de ella, y luego Ctrl+A / Ctrl+C.
+    Estrategias (se prueban en orden hasta traer el numero de lineas esperado):
+      A) clic en la grilla -> HOME -> Ctrl+A -> Ctrl+C   (validada en el usuario)
+      B) clic en la grilla -> Ctrl+A -> Ctrl+C
+      C) clic en la 1a celda -> Ctrl+A -> Ctrl+C
+    Si `filas_esperadas` > 0 y lo copiado trae muchas menos lineas, se reintenta:
+    eso evita devolver una tabla equivocada (p.ej. la grilla de filtros).
     """
-    grilla = _buscar(ventana, GRILLA, control_type="Table")
-    if grilla is None:
-        grilla = _buscar(ventana, GRILLA)
+    grilla = grilla_principal(ventana)
     if grilla is None:
         raise RuntimeError("No encontre la grilla ('GridView:Parent=Control').")
 
-    # Reintenta varias veces: a veces la grilla aun no responde al primer intento.
-    for intento in range(1, 6):
+    def _copiar_con(estrategia: str) -> str:
         pyperclip.copy("")
-        grilla.click_input()
-        time.sleep(0.5)
-        grilla.type_keys("{HOME}")
-        time.sleep(0.3)
-        grilla.type_keys("^a")
-        time.sleep(0.5)
-        grilla.type_keys("^c")
+        try:
+            if estrategia == "C":
+                grilla.click_input(coords=(10, 10))
+            else:
+                grilla.click_input()
+            time.sleep(0.4)
+            if estrategia == "A":
+                grilla.type_keys("{HOME}")
+                time.sleep(0.3)
+            grilla.type_keys("^a")
+            time.sleep(0.5)
+            grilla.type_keys("^c")
+        except Exception:
+            pass
         time.sleep(cfg.app.espera_ui)
+        return pyperclip.paste()
 
-        texto = pyperclip.paste()
-        if texto.strip():
-            return texto
-        print(f"   (intento {intento}: portapapeles vacio, reintentando...)")
+    def _suficiente(texto: str) -> bool:
+        if not texto.strip():
+            return False
+        if filas_esperadas <= 0:
+            return True
+        return len(texto.splitlines()) >= max(filas_esperadas * 0.5, 1)
+
+    mejor = ""
+    for ronda in range(1, 5):
+        for estrategia in ("A", "B", "C"):
+            texto = _copiar_con(estrategia)
+            if len(texto.splitlines()) > len(mejor.splitlines()):
+                mejor = texto
+            if _suficiente(texto):
+                print(f"   (copia OK con estrategia {estrategia}: "
+                      f"{len(texto.splitlines())} lineas)")
+                return texto
+        print(f"   (ronda {ronda}: copia incompleta "
+              f"({len(mejor.splitlines())} lineas de {filas_esperadas} esperadas), "
+              f"reintentando...)")
         time.sleep(2)
 
+    if mejor.strip():
+        print(f"   [!] Se devuelve la mejor copia obtenida: "
+              f"{len(mejor.splitlines())} lineas (esperadas {filas_esperadas}).")
+        return mejor
     raise RuntimeError("El portapapeles quedo vacio tras varios intentos de Ctrl+A/Ctrl+C.")
 
 
@@ -396,7 +459,7 @@ def capturar(cfg: Config) -> str:
     if filas == 0:
         raise RuntimeError("La grilla no trajo resultados (0 filas) tras pulsar Buscar.")
     print(f"   ({filas} filas en la grilla)")
-    return copiar_grilla(cfg, ventana)
+    return copiar_grilla(cfg, ventana, filas_esperadas=filas)
 
 
 # --------------------------------------------------------------------------
@@ -443,4 +506,4 @@ def capturar_caja_pickeada(cfg: Config, navegar: bool = True) -> str:
     if filas == 0:
         raise RuntimeError("La grilla no trajo resultados (0 filas) tras pulsar Buscar.")
     print(f"   ({filas} filas en la grilla)")
-    return copiar_grilla(cfg, ventana)
+    return copiar_grilla(cfg, ventana, filas_esperadas=filas)

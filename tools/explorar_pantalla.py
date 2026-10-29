@@ -157,6 +157,7 @@ def main() -> int:
         print("[1] Navegacion OMITIDA (pantalla actual).")
 
     volcar_filtros(ventana)
+    filas = 0
 
     print("\n[Columnas] HeaderItem de la grilla, en orden:")
     nombres = nombres_columnas(ventana)
@@ -177,7 +178,7 @@ def main() -> int:
 
     print("\n[Copiar] Copiando la grilla (Ctrl+A/Ctrl+C)...")
     try:
-        texto = capture_ui.copiar_grilla(cfg, ventana)
+        texto = capture_ui.copiar_grilla(cfg, ventana, filas_esperadas=filas)
     except Exception as e:
         print(f"   [!] No se pudo copiar: {e}")
         return 1
