@@ -381,34 +381,95 @@ def esperar_resultados(cfg: Config, ventana, timeout: float = 60.0) -> int:
     return filas
 
 
+def _copiar_por_rango_uia(grilla, filas: int) -> str:
+    """Respaldo: selecciona la grilla entera por patron UIA y copia.
+
+    Algunas grillas DevExpress exponen el patron Selection con select() sobre un
+    rango de celdas. Se intenta marcar todas las celdas y luego Ctrl+C.
+    """
+    try:
+        cells = []
+        for c in grilla.descendants():
+            try:
+                if c.element_info.control_type == "DataItem":
+                    cells.append(c)
+            except Exception:
+                continue
+        if not cells:
+            return ""
+        # Marca la primera, la ultima y todo el rango intermedio con click+shift
+        primero = cells[0]
+        ultimo = cells[-1]
+        primero.click_input()
+        time.sleep(0.3)
+        try:
+            ultimo.click_input(coords=(1, 1))
+        except Exception:
+            pass
+        time.sleep(0.3)
+        grilla.type_keys("^a")
+        time.sleep(0.4)
+        grilla.type_keys("^c")
+        time.sleep(0.8)
+        return pyperclip.paste()
+    except Exception:
+        return ""
+
+
 def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
     """Copia la grilla de DATOS completa.
 
-    Estrategias (se prueban en orden hasta traer el numero de lineas esperado):
-      A) clic en la grilla -> HOME -> Ctrl+A -> Ctrl+C   (validada en el usuario)
-      B) clic en la grilla -> Ctrl+A -> Ctrl+C
-      C) clic en la 1a celda -> Ctrl+A -> Ctrl+C
-    Si `filas_esperadas` > 0 y lo copiado trae muchas menos lineas, se reintenta:
-    eso evita devolver una tabla equivocada (p.ej. la grilla de filtros).
+    En estas grillas (DevExpress) Ctrl+A NO siempre selecciona todo: hay que
+    extender la seleccion con Ctrl+Shift+End. Por eso se prueban varias
+    estrategias y se verifica contra `filas_esperadas`:
+
+      A) clic -> HOME -> Ctrl+A -> Ctrl+C
+      B) clic -> Ctrl+A -> Ctrl+C
+      C) clic en 1a celda -> Ctrl+A -> Ctrl+C
+      D) clic en 1a celda -> Ctrl+Shift+End -> Ctrl+C        <- suele ser la buena
+      E) clic en 1a celda -> HOME -> Ctrl+Shift+End -> Ctrl+C
+      F) clic -> Ctrl+A -> Ctrl+A -> Ctrl+C
+      G) clic -> Ctrl+C   (copia la seleccion actual)
+      H) clic en 1a celda -> Ctrl+Shift+End -> Enter -> Ctrl+A -> Ctrl+C
+
+    Devuelve la mejor copia obtenida y avisa si no alcanzo `filas_esperadas`.
     """
     grilla = grilla_principal(ventana)
     if grilla is None:
         raise RuntimeError("No encontre la grilla ('GridView:Parent=Control').")
 
+    def _secuencia(estrategia: str) -> None:
+        # Foco dentro de la grilla
+        if estrategia in ("C", "D", "E", "H"):
+            grilla.click_input(coords=(10, 10))
+        else:
+            grilla.click_input()
+        time.sleep(0.4)
+
+        if estrategia == "A":
+            grilla.type_keys("{HOME}"); time.sleep(0.3); grilla.type_keys("^a")
+        elif estrategia == "B":
+            grilla.type_keys("^a")
+        elif estrategia == "C":
+            grilla.type_keys("^a")
+        elif estrategia == "D":
+            grilla.type_keys("^+{END}")           # Ctrl+Shift+End
+        elif estrategia == "E":
+            grilla.type_keys("{HOME}"); time.sleep(0.3); grilla.type_keys("^+{END}")
+        elif estrategia == "F":
+            grilla.type_keys("^a"); time.sleep(0.3); grilla.type_keys("^a")
+        elif estrategia == "G":
+            pass
+        elif estrategia == "H":
+            grilla.type_keys("^+{END}"); time.sleep(0.3); grilla.type_keys("{ENTER}")
+            time.sleep(0.3); grilla.type_keys("^a")
+        time.sleep(0.5)
+        grilla.type_keys("^c")
+
     def _copiar_con(estrategia: str) -> str:
         pyperclip.copy("")
         try:
-            if estrategia == "C":
-                grilla.click_input(coords=(10, 10))
-            else:
-                grilla.click_input()
-            time.sleep(0.4)
-            if estrategia == "A":
-                grilla.type_keys("{HOME}")
-                time.sleep(0.3)
-            grilla.type_keys("^a")
-            time.sleep(0.5)
-            grilla.type_keys("^c")
+            _secuencia(estrategia)
         except Exception:
             pass
         time.sleep(cfg.app.espera_ui)
@@ -422,8 +483,8 @@ def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
         return len(texto.splitlines()) >= max(filas_esperadas * 0.5, 1)
 
     mejor = ""
-    for ronda in range(1, 5):
-        for estrategia in ("A", "B", "C"):
+    for ronda in range(1, 4):
+        for estrategia in ("D", "E", "A", "B", "C", "F", "G", "H"):
             texto = _copiar_con(estrategia)
             if len(texto.splitlines()) > len(mejor.splitlines()):
                 mejor = texto
@@ -434,11 +495,13 @@ def copiar_grilla(cfg: Config, ventana, filas_esperadas: int = 0) -> str:
         print(f"   (ronda {ronda}: copia incompleta "
               f"({len(mejor.splitlines())} lineas de {filas_esperadas} esperadas), "
               f"reintentando...)")
-        time.sleep(2)
+        time.sleep(1.5)
 
     if mejor.strip():
         print(f"   [!] Se devuelve la mejor copia obtenida: "
               f"{len(mejor.splitlines())} lineas (esperadas {filas_esperadas}).")
+        print("       Si son pocas, corre tools/diagnosticar_copia_grilla.py para ver "
+              "que metodo funciona en esta pantalla.")
         return mejor
     raise RuntimeError("El portapapeles quedo vacio tras varios intentos de Ctrl+A/Ctrl+C.")
 
