@@ -36,12 +36,68 @@ from src import capture_ui, config
 
 GRILLA = capture_ui.GRILLA
 
-# Ruta confirmada por el usuario
-RUTA_MENU = [
-    ("Aplicaciones", "aplicaciones"),
-    ("Reabastecimiento", "reabastecimiento"),
-    ("Opciones de reabastecimiento", "opciones de reabastecimiento"),
-]
+# Ruta confirmada en el PC del usuario (2026-10-29):
+#   Aplicaciones > Reabastecimiento > Operaciones de reabastecimiento
+# El submenu real se llama "Operaciones de reabastecimiento" (auto_id 294).
+# El nombre del item es configurable con --item (por si cambia).
+ITEM_POR_DEFECTO = "operaciones de reabastecimiento"
+
+
+def _navegar_reabastecimiento(cfg, ventana, item: str) -> None:
+    """Navega Aplicaciones > Reabastecimiento > <item>.
+
+    Es tolerante: abre 'Aplicaciones', luego 'Reabastecimiento' y, en el submenu,
+    busca el item por el texto indicado; si no lo encuentra, elige el primer
+    MenuItem que contenga 'reabastecimiento' y no sea el padre.
+    """
+    try:
+        ventana.set_focus()
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    for nivel, texto in (("Aplicaciones", "aplicaciones"), ("Reabastecimiento", "reabastecimiento")):
+        it = capture_ui._buscar_menuitem_exacto(texto)
+        if it is None:
+            raise RuntimeError(f"No encontre el MenuItem {nivel!r}.")
+        it.click_input()
+        time.sleep(cfg.app.espera_ui)
+
+    # En el submenu, buscar el item por texto
+    objetivo = item.strip().lower()
+    elegido = None
+    candidatos: list[str] = []
+    from pywinauto import Desktop
+
+    for w in Desktop(backend="uia").windows(top_level_only=True):
+        try:
+            for c in w.descendants():
+                try:
+                    if c.element_info.control_type != "MenuItem":
+                        continue
+                    t = c.window_text().strip()
+                    if not t:
+                        continue
+                    candidatos.append(t)
+                    tl = t.lower()
+                    if tl == objetivo:
+                        elegido = c
+                    elif elegido is None and "reabastecimiento" in tl and tl != "reabastecimiento":
+                        elegido = c
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    if elegido is None:
+        print(f"   [!] No encontre el item {item!r} en el submenu.")
+        print(f"   Items disponibles: {sorted(set(candidatos))}")
+        raise RuntimeError("No encontre el item del submenu de Reabastecimiento.")
+
+    print(f"   (item del submenu: {elegido.window_text()!r})")
+    elegido.click_input()
+    time.sleep(cfg.app.espera_ui)
+
 
 # Controles de navegacion que no son filtros (se omiten del volcado)
 RUIDO_AUTOID = {
@@ -118,6 +174,8 @@ def main() -> int:
     ap.add_argument("--sin-menu", action="store_true", help="No navegar; usar la pantalla actual")
     ap.add_argument("--sin-buscar", action="store_true", help="No pulsar Buscar")
     ap.add_argument("--nombre", default="reabastecimiento", help="Nombre del TSV de salida")
+    ap.add_argument("--item", default=ITEM_POR_DEFECTO,
+                    help="Nombre del item del submenu de Reabastecimiento")
     args = ap.parse_args()
 
     cfg = config.cargar("config.toml")
@@ -128,9 +186,10 @@ def main() -> int:
     print(f"Estado: {titulo_actual(ventana)}\n")
 
     if not args.sin_menu:
-        print("[1] Navegando: Aplicaciones > Reabastecimiento > Opciones de reabastecimiento...")
+        print("[1] Navegando: Aplicaciones > Reabastecimiento > "
+              f"{args.item}...")
         try:
-            capture_ui.ir_a_por_menu(cfg, ventana, RUTA_MENU)
+            _navegar_reabastecimiento(cfg, ventana, args.item)
             print(f"   OK. {titulo_actual(ventana)}")
         except Exception as e:
             print(f"   [!] FALLO la navegacion: {type(e).__name__}: {e}")
