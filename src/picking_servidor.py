@@ -173,7 +173,7 @@ PAGINA_GRUA = """<!doctype html>
 </style>
 </head>
 <body>
-<h1>Grua — reaprovisionamiento</h1>
+<h1 id="titulo">Grua — reaprovisionamiento</h1>
 <div id="msg">Cargando tarea...</div>
 
 <div id="trabajo" class="oculto">
@@ -223,6 +223,7 @@ async function cargar() {
   $('cant').value = tarea.cantidad;
   $('btnOk').disabled = false;
   aviso('Tarea ' + (j.hechas + 1) + ' de ' + j.total + '. Baje y confirme.');
+  if (tarea.operador_nombre) $('titulo').textContent = 'Grua — ' + tarea.operador_nombre;
 }
 
 $('btnOk').addEventListener('click', async () => {
@@ -294,6 +295,30 @@ PAGINA_REAPRO = """<!doctype html>
 const $ = id => document.getElementById(id);
 function aviso(t, c) { $('msg').className = c || ''; $('msg').textContent = t; }
 
+let operadorElegido = '';
+
+async function cargarOperadores() {
+  const r = await fetch('/api/reapro/operadores');
+  const j = await r.json();
+  const caja = $('operadores');
+  caja.innerHTML = '';
+  (j.operadores || []).forEach(o => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = o.etiqueta;
+    b.style.cssText = 'flex:1;min-width:130px;background:#1e293b;color:#e6edf7;' +
+      'border:2px solid #2b3d5c;border-radius:10px;padding:14px;font-size:17px;' +
+      'font-weight:700;margin-top:0;';
+    b.onclick = () => {
+      operadorElegido = o.codigo;
+      [...caja.children].forEach(c => c.style.borderColor = '#2b3d5c');
+      b.style.borderColor = '#38bdf8';
+      $('btnGenerar').disabled = false;
+    };
+    caja.appendChild(b);
+  });
+}
+
 async function cargar() {
   const r = await fetch('/api/reapro/necesidades');
   const j = await r.json();
@@ -322,14 +347,10 @@ async function cargar() {
   $('btnGenerar').disabled = false;
 }
 
-$('operador').addEventListener('input', () => {
-  $('btnGenerar').disabled = !$('operador').value.trim();
-});
-
 $('btnGenerar').addEventListener('click', async () => {
   const r = await fetch('/api/reapro/destinar', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({operador: $('operador').value.trim(), usuario: 'SUPERVISOR'}),
+    body: JSON.stringify({operador: operadorElegido, usuario: 'SUPERVISOR'}),
   });
   const j = await r.json();
   if (!j.ok) { aviso('Error: ' + j.error, 'err'); return; }
@@ -940,11 +961,22 @@ class Handler(BaseHTTPRequestHandler):
             if t is None:
                 self._json({"ok": False})
                 return
+            from . import reapro as _rp
             self._json({"ok": True, "tarea": {
                 "id": t["id"], "origen": t["origen"], "destino": t["destino"],
                 "sku": t["sku"], "descripcion": t["descripcion"],
                 "cantidad": t["cantidad"],
+                "operador": t.get("operador", ""),
+                "operador_nombre": _rp.nombre_operador(t.get("operador", "")),
             }, "total": t["total"], "hechas": t["hechas"]})
+            return
+
+        if u.path == "/api/reapro/operadores":
+            from . import reapro
+            self._json({"ok": True, "operadores": [
+                {"codigo": c, "nombre": reapro.nombre_operador(c),
+                 "etiqueta": reapro.etiqueta_operador(c)}
+                for c in reapro.OPERADORES_GRUA]})
             return
 
         if u.path == "/api/reapro/necesidades":

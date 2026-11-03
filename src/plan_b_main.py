@@ -242,14 +242,14 @@ def cmd_picking(args) -> int:
 
     demanda = venta.demanda_por_sku()
     creadas, reservadas, faltantes = picking.destinar(
-        ruta, demanda, incluir_almacenamiento=args.con_almacenamiento
+        ruta, demanda, incluir_almacenamiento=not args.solo_picking
     )
     if creadas == 0:
         print("[!] No se generaron tareas. Revisa el stock disponible.")
         return 1
 
     print(f"Tareas destinadas: {creadas}  |  cajas RESERVADAS: {reservadas}")
-    print(f"  (incluye almacenamiento: {args.con_almacenamiento})")
+    print(f"  (solo picking: {args.solo_picking}; por defecto tambien almacenamiento)")
 
     if not faltantes.empty:
         print(f"\n⚠️ {len(faltantes)} SKUs sin stock suficiente "
@@ -448,8 +448,9 @@ def main() -> int:
     p.set_defaults(func=cmd_contraste)
 
     p = sub.add_parser("picking", help="Destina tareas de picking (reserva el stock)")
-    p.add_argument("--con-almacenamiento", action="store_true",
-                   help="Permitir tambien picking desde AREA ALMACENAMIENTO")
+    p.add_argument("--solo-picking", action="store_true",
+                   help="Buscar SOLO en AREA PICKING (por defecto tambien usa "
+                        "ALMACENAMIENTO, que es el flujo real)")
     p.add_argument("--reiniciar-stock", action="store_true",
                    help="Reinicia el stock vivo desde la foto antes de destinar")
     p.set_defaults(func=cmd_picking)

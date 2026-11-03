@@ -95,11 +95,15 @@ def preparar_tablas(con: sqlite3.Connection) -> None:
 def destinar(
     db: str | Path,
     demanda: pd.DataFrame,
-    incluir_almacenamiento: bool = False,
+    incluir_almacenamiento: bool = True,
 ) -> tuple[int, int, pd.DataFrame]:
     """Convierte la demanda en tareas, RESERVANDO el stock de cada una.
 
     `demanda` trae al menos `sku_clave` y `cajas`.
+
+    IMPORTANTE: por defecto TAMBIEN busca en ALMACENAMIENTO cuando la ubicacion
+    de picking no alcanza. Eso es el flujo real: "en algun momento para completar
+    la venta van a traer pallet del almacenamiento para completar" (usuario).
 
     Devuelve (tareas_creadas, cajas_reservadas, faltantes).
     """

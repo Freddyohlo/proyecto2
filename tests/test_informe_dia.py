@@ -181,14 +181,29 @@ def test_sku_nuevo_entra_a_almacenamiento_no_a_picking(db):
     assert f["area"] != "AREA PICKING"
 
 
-def test_sku_nuevo_no_aparece_en_las_tareas_de_picking(db):
-    """El generador de tareas solo toma AREA PICKING: el nuevo no debe salir."""
+def test_sku_nuevo_entra_al_stock_y_se_puede_usar(db):
+    """El SKU nuevo queda en ALMACENAMIENTO, y de ahi se puede tomar si hace falta.
+
+    El producto nuevo NO tiene ubicacion de picking (esa regla se respeta: no
+    aparece como ubicacion de picking), pero como esta en almacenamiento el
+    sistema SI puede usarlo para completar una venta, que es el flujo real.
+    """
     rc.crear_sku(db, sku="700809", cantidad=500, ubicacion="C16-01-01-01",
                  lpn="LPN1", fecha_vencimiento="01/12/2027")
+
+    # No aparece como ubicacion de PICKING
+    with sv.abrir(db) as con:
+        f = con.execute(
+            f"SELECT area FROM {sv.TABLA} WHERE sku_clave = ?", ("700809",)
+        ).fetchone()
+    assert f["area"] == sv.AREA_ALMACENAMIENTO
+
+    # Pero si se puede tomar desde almacenamiento (con solo_picking no saldria)
     creadas, reservadas, _ = pk.destinar(
         db, pd.DataFrame([("700809", 100)], columns=["sku_clave", "cajas"]))
-    assert creadas == 0, "un SKU nuevo en almacenamiento no debe generar picking"
-    assert reservadas == 0
+    assert reservadas == 100, "debe poder usarse desde almacenamiento"
+    t = pk.tarea_pendiente(db)
+    assert t["area"] == sv.AREA_ALMACENAMIENTO
 
 
 def test_sku_nuevo_si_sirve_para_reaprovisionar(db):

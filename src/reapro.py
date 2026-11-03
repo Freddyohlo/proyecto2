@@ -33,6 +33,28 @@ from .externos import clave_sku
 
 TABLA_REAPRO = "reapro"
 
+# Operadores de grua. El codigo es lo que se guarda en las tareas; el nombre es
+# para que la pantalla muestre algo legible ("GRUA1 — Carlos").
+# Se pueden cambiar aca o desde el archivo de configuracion.
+OPERADORES_GRUA = {
+    "GRUA1": "Carlos",
+    "GRUA2": "Manuel",
+}
+
+
+def nombre_operador(codigo: str) -> str:
+    """Nombre legible de un operador ('GRUA1' -> 'Carlos')."""
+    codigo = str(codigo or "").strip()
+    if not codigo:
+        return ""
+    return OPERADORES_GRUA.get(codigo.upper(), "")
+
+
+def etiqueta_operador(codigo: str) -> str:
+    """Etiqueta para mostrar: 'GRUA1 — Carlos' (o solo el codigo)."""
+    n = nombre_operador(codigo)
+    return f"{codigo} — {n}" if n else codigo
+
 
 @dataclass
 class NecesidadReapro:

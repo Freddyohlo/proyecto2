@@ -134,18 +134,34 @@ def test_destinar_dos_veces_no_duplica_el_picking(db):
     assert creadas2 == 2 and reservadas2 == 20
 
 
-def test_destinar_agota_y_reporta_faltante(db):
+def test_destinar_agota_picking_y_usa_almacenamiento(db):
+    """Por defecto TAMBIEN busca en almacenamiento (flujo real confirmado).
+
+    Picking tiene 42 y almacenamiento 500 -> los 60 se cubren.
+    """
     creadas, reservadas, faltan = pk.destinar(db, _demanda([("622", 60)]))
-    # en picking hay 42; el resto (18) es faltante
+    assert reservadas == 60
+    assert faltan.empty
+
+
+def test_destinar_solo_picking_reporta_faltante(db):
+    """Con solo_picking, lo que no alcanza en picking es faltante."""
+    creadas, reservadas, faltan = pk.destinar(
+        db, _demanda([("622", 60)]), incluir_almacenamiento=False)
     assert reservadas == 42
     assert faltan.iloc[0]["faltante"] == 18
 
 
-def test_destinar_con_almacenamiento_alcanza(db):
-    creadas, reservadas, faltan = pk.destinar(
-        db, _demanda([("622", 60)]), incluir_almacenamiento=True)
-    assert reservadas == 60
-    assert faltan.empty
+def test_destinar_respeta_fefo_tambien_desde_almacenamiento(db):
+    """Al usar almacenamiento, el orden sigue siendo FEFO."""
+    pk.destinar(db, _demanda([("622", 60)]))
+    with sv.abrir(db) as con:
+        filas = con.execute(
+            "SELECT lote, area FROM tareas WHERE estado='pendiente' ORDER BY id"
+        ).fetchall()
+    # Primero el picking (lote A, vence antes), despues el lote B y luego almacen
+    assert filas[0]["area"] == "AREA PICKING"
+    assert any(f["area"] == sv.AREA_ALMACENAMIENTO for f in filas)
 
 
 def test_destinar_respeta_fefo(db):

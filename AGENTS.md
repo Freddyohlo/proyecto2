@@ -507,9 +507,30 @@ Mitigaciones implementadas:
   el SKU escaneado no está en el stock (`origen: "codigo"`).
 - CLI: `python -m src.plan_b_main recepcion --sku-nuevo 700809 --cantidad 198 ...`.
 
-### Reaprovisionamiento guiado (almacén → picking)
+### Flujo real del picking: el picking NO alcanza -> se baja de ALMACENAMIENTO
+⚠️ **Corrección importante (usuario):** el reapro por mínimo es **redundante**.
+El flujo real es: la venta se cubre con el stock que tenemos, y **cuando la
+ubicación de picking no alcanza, se traen pallets del almacenamiento para
+completar**. Eso ya lo hace el propio destinado de tareas.
+
+- `picking.destinar()` ahora busca en **ALMACENAMIENTO por defecto**
+  (`incluir_almacenamiento=True`). Antes solo miraba picking y dejaba faltantes
+  que en realidad sí se podían cubrir.
+- Orden **FEFO** en ambos: primero las ubicaciones de picking, después el
+  almacenamiento, y dentro de cada una el lote que vence antes.
+- `--solo-picking` en el CLI para el caso en que se quiera restringir.
+- El producto nuevo (que entra a almacenamiento) **sí se puede usar** para
+  completar una venta: no aparece como ubicación de picking (esa regla se
+  respeta), pero de almacenamiento sí se toma.
+
+### Reaprovisionamiento por mínimo (opcional, `/reapro` + `/grua`)
 - `src/reapro.py` — detecta las ubicaciones de picking **bajo el mínimo** y genera
-  las tareas para un **operador de grúa**. Trabaja contra el **stock vivo** (respeta
+  las tareas para un **operador de grúa**. (El usuario lo ve como un extra: el
+  flujo de la venta ya cubre el caso. Se mantiene por si quieren forzar el
+  reabastecimiento del picking sin esperar a que la venta lo pida.)
+- **Operadores de grúa con nombre**: `reapro.OPERADORES_GRUA` (`GRUA1` → Carlos,
+  `GRUA2` → Manuel). El dashboard los muestra como botones
+  ("GRUA1 — Carlos") y la pantalla de la grúa muestra el nombre del operador. Trabaja contra el **stock vivo** (respeta
   reservas), no contra la foto.
   - `calcular(db)` → necesidades (stock actual, mínimo, máximo, cuánto reponer,
     cuánto hay en almacén, si alcanza).
