@@ -199,3 +199,69 @@ def test_resumen(db):
     rp.destinar(db, operador="GRUA1")
     r = rp.resumen(db)
     assert r["tareas"] >= 1 and r["pendientes"] >= 1 and r["hechas"] == 0
+
+
+# --------------------------------------------------------------------------
+# PIN y nombres de operadores
+# --------------------------------------------------------------------------
+
+def test_verificar_pin():
+    assert rp.verificar_pin("GRUA1", "1111") is True
+    assert rp.verificar_pin("GRUA2", "2222") is True
+    assert rp.verificar_pin("GRUA1", "2222") is False
+    assert rp.verificar_pin("GRUA1", "") is False
+    assert rp.verificar_pin("", "1111") is False
+    assert rp.verificar_pin("GRUA9", "1111") is False
+
+
+def test_nombre_y_etiqueta_del_operador():
+    assert rp.nombre_operador("GRUA1") == "Carlos"
+    assert rp.nombre_operador("GRUA2") == "Manuel"
+    assert rp.nombre_operador("DESCONOCIDO") == ""
+    assert rp.etiqueta_operador("GRUA1") == "GRUA1 — Carlos"
+    assert rp.etiqueta_operador("X") == "X"
+
+
+def test_tarea_filtra_por_operador(db):
+    """Cada grua ve solo lo suyo (y lo que no tiene operador asignado)."""
+    rp.destinar(db, operador="GRUA1")
+    t1 = rp.tarea_pendiente(db, "GRUA1")
+    assert t1 is not None
+    assert t1["operador"] == "GRUA1"
+
+
+# --------------------------------------------------------------------------
+# El reapro aparece en el informe del dia
+# --------------------------------------------------------------------------
+
+def test_informe_incluye_reapro(db):
+    from src import informe_dia as inf
+
+    rp.destinar(db, operador="GRUA1", usuario="SUPERVISOR")
+    t = rp.tarea_pendiente(db)
+    rp.confirmar(db, t["id"], 200, "GRUA1")
+
+    d = inf.recopilar(db)
+    assert d.reapro["tareas"] >= 1
+    assert d.cajas_reapro == 200
+    assert not d.reapro_mov.empty
+    assert d.reapro_mov.iloc[0]["operador"] == "GRUA1"
+    assert d.reapro_mov.iloc[0]["origen"] == "A-01"
+    assert d.reapro_mov.iloc[0]["destino"] == "60-001"
+
+
+def test_informe_avisa_reapro_sin_confirmar(db):
+    from src import informe_dia as inf
+
+    rp.destinar(db, operador="GRUA1")
+    d = inf.recopilar(db)
+    textos = " ".join(a["texto"] for a in d.alertas())
+    assert "sin confirmar" in textos
+
+
+def test_informe_sin_reapro_no_falla(db):
+    from src import informe_dia as inf
+    d = inf.recopilar(db)
+    assert d.reapro["tareas"] == 0
+    assert d.cajas_reapro == 0
+    assert d.reapro_mov.empty

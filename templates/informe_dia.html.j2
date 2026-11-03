@@ -58,6 +58,11 @@
       <div class="val num">{{ d.cajas_recibidas }}</div>
     </div>
     <div class="card">
+      <div class="lbl">Movs. de reapro</div>
+      <div class="val num">{{ reapro.tareas or 0 }}
+        <small>({{ d.cajas_reapro }} cajas)</small></div>
+    </div>
+    <div class="card">
       <div class="lbl">Reservado (en tareas)</div>
       <div class="val num">{{ stock.reservado }}</div>
     </div>
@@ -113,6 +118,30 @@
       <p>No hubo recepciones.</p>
     {% endif %}
   </div>
+
+  {% if reapro_mov %}
+  <div class="panel">
+    <h2>Reaprovisionamiento — movimientos de la grúa ({{ reapro.tareas or 0 }}
+        movimientos, {{ d.cajas_reapro }} cajas)</h2>
+    <table>
+      <thead><tr><th>Operador</th><th>SKU</th><th>Descripción</th>
+                 <th>Bajó de</th><th>Dejó en</th><th>Cajas</th><th>Estado</th></tr></thead>
+      <tbody>
+      {% for r in reapro_mov %}
+        <tr>
+          <td>{{ r.operador or '—' }}</td>
+          <td>{{ r.sku }}</td>
+          <td>{{ r.descripcion or '—' }}</td>
+          <td>{{ r.origen or '—' }}</td>
+          <td>{{ r.destino }}</td>
+          <td class="num">{{ r.cantidad }}</td>
+          <td>{{ r.estado }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
 
   {% if skus_nuevos %}
   <div class="panel">

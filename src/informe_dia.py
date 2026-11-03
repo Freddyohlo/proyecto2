@@ -33,6 +33,8 @@ class ResumenDia:
     recepcion: dict = field(default_factory=dict)
     picking_mov: pd.DataFrame = field(default_factory=pd.DataFrame)
     recepcion_mov: pd.DataFrame = field(default_factory=pd.DataFrame)
+    reapro_mov: pd.DataFrame = field(default_factory=pd.DataFrame)
+    reapro: dict = field(default_factory=dict)
     skus_nuevos: pd.DataFrame = field(default_factory=pd.DataFrame)
     por_sku: pd.DataFrame = field(default_factory=pd.DataFrame)
     ubicaciones: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -44,6 +46,11 @@ class ResumenDia:
     @property
     def cajas_recibidas(self) -> int:
         return int(self.recepcion.get("cajas", 0))
+
+    @property
+    def cajas_reapro(self) -> int:
+        """Cajas bajadas de almacenamiento a picking por la grua."""
+        return int(self.reapro.get("cajas", 0))
 
     def alertas(self) -> list[dict]:
         """Cosas que conviene mirar antes de cerrar el dia."""
@@ -62,6 +69,10 @@ class ResumenDia:
         if self.tareas.get("saltada", {}).get("tareas"):
             a.append({"nivel": "warn",
                       "texto": f"{self.tareas['saltada']['tareas']} tareas saltadas"})
+        if self.reapro.get("pendientes"):
+            a.append({"nivel": "warn",
+                      "texto": f"{self.reapro['pendientes']} reaprovisionamientos sin "
+                               f"confirmar (la grua no los bajo)"})
         if not self.skus_nuevos.empty:
             a.append({"nivel": "info",
                       "texto": f"{len(self.skus_nuevos)} SKU nuevos que no venian en "
@@ -89,6 +100,25 @@ def recopilar(db: str | Path, fecha: str = "") -> ResumenDia:
                       fecha_vencimiento, estado
                  FROM recepcion ORDER BY id""", con)
 
+        # Reaprovisionamiento (movimientos de grua)
+        try:
+            reapro_mov = pd.read_sql_query(
+                """SELECT fecha, operador, sku, descripcion, origen, destino,
+                          cantidad, estado FROM reapro ORDER BY id""", con)
+            reapro_res = {
+                "tareas": int(reapro_mov["cantidad"].count()),
+                "cajas": int(reapro_mov["cantidad"].sum()) if len(reapro_mov) else 0,
+                "pendientes": int((reapro_mov["estado"] == "pendiente").sum())
+                if len(reapro_mov) else 0,
+                "hechas": int((reapro_mov["estado"] == "ok").sum())
+                if len(reapro_mov) else 0,
+            }
+        except Exception:
+            reapro_mov = pd.DataFrame(columns=["fecha", "operador", "sku",
+                                               "descripcion", "origen", "destino",
+                                               "cantidad", "estado"])
+            reapro_res = {"tareas": 0, "cajas": 0, "pendientes": 0, "hechas": 0}
+
         # Cajas movidas por SKU (lo pickeado)
         por_sku = pd.read_sql_query(
             """SELECT sku, descripcion, SUM(cantidad) AS cajas, COUNT(*) AS picks
@@ -107,6 +137,8 @@ def recopilar(db: str | Path, fecha: str = "") -> ResumenDia:
         recepcion=rc.resumen(db),
         picking_mov=picking_mov,
         recepcion_mov=recep_mov,
+        reapro_mov=reapro_mov,
+        reapro=reapro_res,
         skus_nuevos=rc.skus_nuevos(db),
         por_sku=por_sku,
         ubicaciones=ubicaciones,
@@ -127,6 +159,8 @@ def generar_excel(d: ResumenDia, destino: str | Path) -> Path:
         {"concepto": "Cajas recibidas", "valor": d.cajas_recibidas},
         {"concepto": "Recepciones", "valor": d.recepcion.get("recepciones", 0)},
         {"concepto": "Recepciones sin ubicar", "valor": d.recepcion.get("pendientes", 0)},
+        {"concepto": "Movimientos de reapro", "valor": d.reapro.get("tareas", 0)},
+        {"concepto": "Cajas bajadas de almacen", "valor": d.cajas_reapro},
     ])
 
     with pd.ExcelWriter(destino, engine="openpyxl") as xw:
@@ -142,6 +176,8 @@ def generar_excel(d: ResumenDia, destino: str | Path) -> Path:
         d.ubicaciones.to_excel(xw, sheet_name="Por ubicacion", index=False)
         d.picking_mov.to_excel(xw, sheet_name="Movimientos picking", index=False)
         d.recepcion_mov.to_excel(xw, sheet_name="Recepcion", index=False)
+        if not d.reapro_mov.empty:
+            d.reapro_mov.to_excel(xw, sheet_name="Reaprovisionamiento", index=False)
         if not d.skus_nuevos.empty:
             d.skus_nuevos.to_excel(xw, sheet_name="SKU nuevos", index=False)
     return destino
@@ -171,6 +207,8 @@ def generar_html(d: ResumenDia, destino: str | Path,
         ubicaciones=d.ubicaciones.head(40).to_dict("records"),
         picking_mov=d.picking_mov.tail(60).to_dict("records"),
         recepcion_mov=d.recepcion_mov.to_dict("records"),
+        reapro=d.reapro,
+        reapro_mov=d.reapro_mov.to_dict("records"),
         skus_nuevos=d.skus_nuevos.to_dict("records"),
     )
     destino.write_text(html, encoding="utf-8")

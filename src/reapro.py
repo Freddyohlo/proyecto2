@@ -41,6 +41,20 @@ OPERADORES_GRUA = {
     "GRUA2": "Manuel",
 }
 
+# PIN de cada operador. Es simple a proposito: la operacion no es tecnica y el
+# objetivo es que quede registrado QUIEN hizo el movimiento, no blindar el equipo.
+# Se puede cambiar aca.
+PINES = {
+    "GRUA1": "1111",
+    "GRUA2": "2222",
+}
+
+
+def verificar_pin(codigo: str, pin: str) -> bool:
+    """True si el PIN corresponde a ese operador."""
+    codigo = str(codigo or "").strip().upper()
+    return bool(codigo) and PINES.get(codigo) == str(pin or "").strip()
+
 
 def nombre_operador(codigo: str) -> str:
     """Nombre legible de un operador ('GRUA1' -> 'Carlos')."""

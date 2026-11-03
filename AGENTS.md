@@ -530,7 +530,14 @@ completar**. Eso ya lo hace el propio destinado de tareas.
   reabastecimiento del picking sin esperar a que la venta lo pida.)
 - **Operadores de grúa con nombre**: `reapro.OPERADORES_GRUA` (`GRUA1` → Carlos,
   `GRUA2` → Manuel). El dashboard los muestra como botones
-  ("GRUA1 — Carlos") y la pantalla de la grúa muestra el nombre del operador. Trabaja contra el **stock vivo** (respeta
+  ("GRUA1 — Carlos") y la pantalla de la grúa muestra el nombre del operador.
+- **Login con PIN** en `/grua`: el operador se elige de una lista y escribe su
+  PIN (`reapro.PINES`: GRUA1=1111, GRUA2=2222). `reapro.verificar_pin()`.
+  Sirve para que quede registrado QUIÉN hizo cada movimiento. Cada grúa ve sus
+  propias tareas (`tarea_pendiente(db, operador)`).
+- El **informe del día incluye el reapro**: tarjeta "Movs. de reapro", tabla de
+  movimientos (operador, SKU, de dónde, a dónde, cajas, estado), hoja de Excel y
+  alerta si quedaron reapros sin confirmar. Trabaja contra el **stock vivo** (respeta
   reservas), no contra la foto.
   - `calcular(db)` → necesidades (stock actual, mínimo, máximo, cuánto reponer,
     cuánto hay en almacén, si alcanza).
@@ -568,9 +575,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **167 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **174 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (13).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

@@ -174,7 +174,21 @@ PAGINA_GRUA = """<!doctype html>
 </head>
 <body>
 <h1 id="titulo">Grua — reaprovisionamiento</h1>
-<div id="msg">Cargando tarea...</div>
+
+<div id="login">
+  <div class="tarjeta">
+    <div style="font-size:16px;color:#93a4bf;margin-bottom:10px;">¿Quién eres?</div>
+    <div id="operadores" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+    <div style="font-size:16px;color:#93a4bf;margin:14px 0 8px;">Tu PIN</div>
+    <input id="pin" type="password" inputmode="numeric" maxlength="6"
+           style="width:100%;font-size:32px;font-weight:800;text-align:center;
+                  letter-spacing:.3em;padding:14px;border-radius:12px;
+                  border:2px solid #2b3d5c;background:#0b1220;color:#e6edf7;">
+    <button id="btnEntrar" disabled>ENTRAR</button>
+  </div>
+</div>
+
+<div id="msg" class="oculto">Cargando tarea...</div>
 
 <div id="trabajo" class="oculto">
   <div class="tarjeta">
@@ -203,10 +217,60 @@ PAGINA_GRUA = """<!doctype html>
 <script>
 const $ = id => document.getElementById(id);
 let tarea = null;
-function aviso(t, c) { $('msg').className = c || ''; $('msg').textContent = t; }
+let operador = '';
+function aviso(t, c) {
+  $('msg').className = c || '';
+  $('msg').textContent = t;
+  $('msg').classList.remove('oculto');
+}
+
+async function cargarOperadores() {
+  const r = await fetch('/api/reapro/operadores');
+  const j = await r.json();
+  const caja = $('operadores');
+  caja.innerHTML = '';
+  (j.operadores || []).forEach(o => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = o.etiqueta;
+    b.style.cssText = 'flex:1;min-width:140px;background:#1e293b;color:#e6edf7;' +
+      'border:2px solid #2b3d5c;border-radius:10px;padding:16px;font-size:18px;' +
+      'font-weight:700;margin-top:0;';
+    b.onclick = () => {
+      operador = o.codigo;
+      [...caja.children].forEach(c => c.style.borderColor = '#2b3d5c');
+      b.style.borderColor = '#38bdf8';
+      $('btnEntrar').disabled = !$('pin').value.trim();
+      $('pin').focus();
+    };
+    caja.appendChild(b);
+  });
+}
+
+$('pin').addEventListener('input', () => {
+  $('btnEntrar').disabled = !(operador && $('pin').value.trim());
+});
+
+$('btnEntrar').addEventListener('click', async () => {
+  const r = await fetch('/api/reapro/entrar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({operador: operador, pin: $('pin').value.trim()}),
+  });
+  const j = await r.json();
+  if (!j.ok) {
+    $('msg').className = 'err';
+    $('msg').textContent = j.error || 'PIN incorrecto';
+    $('pin').value = '';
+    return;
+  }
+  $('login').classList.add('oculto');
+  $('titulo').textContent = 'Grua — ' + (j.nombre || operador);
+  $('pin').value = '';
+  cargar();
+});
 
 async function cargar() {
-  const r = await fetch('/api/reapro/tarea');
+  const r = await fetch('/api/reapro/tarea?operador=' + encodeURIComponent(operador));
   const j = await r.json();
   if (!j.ok) {
     $('trabajo').classList.add('oculto');
@@ -231,7 +295,7 @@ $('btnOk').addEventListener('click', async () => {
   if (n <= 0) { aviso('Cantidad invalida', 'err'); return; }
   const r = await fetch('/api/reapro/confirmar', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({id: tarea.id, cantidad: n, usuario: 'GRUA1'}),
+    body: JSON.stringify({id: tarea.id, cantidad: n, usuario: operador}),
   });
   const j = await r.json();
   if (!j.ok) { aviso('Error: ' + j.error, 'err'); return; }
@@ -239,7 +303,7 @@ $('btnOk').addEventListener('click', async () => {
   setTimeout(cargar, 400);
 });
 
-cargar();
+cargarOperadores();
 </script>
 </body>
 </html>
@@ -957,7 +1021,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/reapro/tarea":
             from . import reapro
-            t = reapro.tarea_pendiente(self.db)
+            t = reapro.tarea_pendiente(self.db, qs.get("operador", [""])[0])
             if t is None:
                 self._json({"ok": False})
                 return
@@ -1026,6 +1090,19 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def do_POST(self):
         u = urlparse(self.path)
+
+        if u.path == "/api/reapro/entrar":
+            from . import reapro
+            datos = self._cuerpo()
+            cod = str(datos.get("operador", "")).strip()
+            pin = str(datos.get("pin", "")).strip()
+            if not reapro.verificar_pin(cod, pin):
+                self._json({"ok": False, "error": "PIN incorrecto"}, 401)
+                return
+            self._json({"ok": True, "operador": cod,
+                        "nombre": reapro.nombre_operador(cod)})
+            return
+
 
         if u.path == "/api/reapro/confirmar":
             from . import reapro
