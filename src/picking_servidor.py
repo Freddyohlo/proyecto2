@@ -52,6 +52,7 @@ PAGINA_MENU = """<!doctype html>
   .recepcion { background: #15803d; }
   .estado { background: #334155; font-size: 19px; padding: 18px 20px; }
   .informe { background: #7c3aed; }
+  .cerrar { background: #b45309; }
   #cajaInforme { background:#334155; border-radius:16px; padding:20px; margin-bottom:14px;
                  display:none; }
   #cajaInforme a { display:inline-block; background:#0b1220; padding:12px 16px;
@@ -73,7 +74,10 @@ PAGINA_MENU = """<!doctype html>
   <small>Stock, tareas y recepcion del dia</small></a>
 
 <a class="informe" href="#" onclick="generarInforme(); return false;">GENERAR INFORMES
-  <small>Cierre del dia: pickeado, recibido y faltantes</small></a>
+  <small>Ver el informe del dia (HTML y Excel)</small></a>
+
+<a class="cerrar" href="#" onclick="cerrarDia(); return false;">CERRAR EL DIA
+  <small>Libera lo no pickeado y genera el informe de cierre</small></a>
 
 <div class="estado" id="cajaEstado" style="display:none;">
   <div id="resumen"></div>
@@ -102,6 +106,24 @@ async function verEstado() {
     'pendientes de ubicar ' + rec.pendientes + (rec.sin_vencimiento ? ' | ⚠️ ' + rec.sin_vencimiento + ' sin vencimiento' : '');
   $('cajaEstado').style.display = 'block';
 }
+async function cerrarDia() {
+  if (!confirm('Cerrar el dia? Se liberan las cajas que quedaron sin pickear y ' +
+               'se genera el informe de cierre.')) return;
+  const r = await fetch('/api/dia/cerrar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({usuario: 'SUPERVISOR'}),
+  });
+  const j = await r.json();
+  if (!j.ok) { alert('Error: ' + j.error); return; }
+  $('avisoInforme').textContent = 'Dia ' + j.fecha + ' cerrado — ' +
+    j.tareas_cerradas + ' tareas cerradas, ' + j.cajas_liberadas +
+    ' cajas liberadas. ' + j.cajas_pickeadas + ' cajas pickeadas.';
+  $('enlaces').innerHTML =
+    '<a href="' + j.html + '" target="_blank">📄 Informe de cierre (HTML)</a>' +
+    '<a href="' + j.excel + '" target="_blank">📊 Excel</a>';
+  $('cajaInforme').style.display = 'block';
+}
+
 async function generarInforme() {
   const r = await fetch('/api/informe/generar', {method: 'POST'});
   const j = await r.json();
@@ -734,6 +756,28 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def do_POST(self):
         u = urlparse(self.path)
+
+        if u.path == "/api/dia/cerrar":
+            from . import informe_dia
+            from datetime import datetime as _dt
+            datos = self._cuerpo()
+            fecha = _dt.now().strftime("%Y-%m-%d")
+            # 1) Liberar las reservas que quedaron colgando
+            cierre = pk.cerrar_dia(self.db, str(datos.get("usuario", "")).strip())
+            # 2) Generar el informe de cierre
+            d = informe_dia.recopilar(self.db, fecha)
+            salida = Path("output")
+            salida.mkdir(exist_ok=True)
+            html = informe_dia.generar_html(d, salida / f"informe_dia_{fecha}.html")
+            xlsx = informe_dia.generar_excel(d, salida / f"informe_dia_{fecha}.xlsx")
+            self._json({"ok": True, "fecha": fecha,
+                        "tareas_cerradas": cierre["tareas_cerradas"],
+                        "cajas_liberadas": cierre["cajas_liberadas"],
+                        "cajas_pickeadas": d.cajas_pickeadas,
+                        "cajas_recibidas": d.cajas_recibidas,
+                        "html": "/informes/" + html.name,
+                        "excel": "/informes/" + xlsx.name})
+            return
 
         if u.path == "/api/informe/generar":
             from . import informe_dia

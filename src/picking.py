@@ -278,6 +278,48 @@ def confirmar(
             "estado": estado, "pedida": pedida}
 
 
+def cerrar_dia(db: str | Path, usuario: str = "", liberar: bool = True) -> dict:
+    """Cierra el dia: libera las reservas que quedaron colgando.
+
+    Si el dia termina con tareas pendientes, esas cajas quedan RESERVADAS (tomadas)
+    sin haberse pickeado. Si no se liberan, se arrastran al dia siguiente y el
+    stock disponible queda artificialmente bajo.
+
+    Lo que hace:
+      - Marca como 'cerrada' toda tarea pendiente.
+      - LIBERA su reserva, para que la mercaderia vuelva a estar disponible.
+      - NO toca las tareas hechas (ok/parcial/saltada): eso ya es historia.
+      - NO libera lo que se pickeo: eso ya salio fisicamente.
+
+    Devuelve el resumen de lo liberado.
+    """
+    momento = datetime.now().isoformat(timespec="seconds")
+
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+
+        pendientes = con.execute(
+            f"""SELECT id, fila_stock, reservado, cantidad
+                  FROM {TABLA_TAREAS} WHERE estado = 'pendiente'"""
+        ).fetchall()
+
+        liberado = 0
+        if liberar:
+            for t in pendientes:
+                if t["fila_stock"]:
+                    sv.liberar(con, t["fila_stock"], int(t["reservado"] or 0))
+                    liberado += int(t["reservado"] or 0)
+            con.execute(
+                f"""UPDATE {TABLA_TAREAS}
+                       SET estado = 'cerrada', fecha_ok = ?, usuario = ?
+                     WHERE estado = 'pendiente'""",
+                (momento, usuario),
+            )
+
+    return {"ok": True, "tareas_cerradas": len(pendientes),
+            "cajas_liberadas": liberado, "momento": momento}
+
+
 def saltar(db: str | Path, id_tarea: int, usuario: str = "") -> dict:
     """Salta una tarea y LIBERA su reserva (vuelve a estar disponible)."""
     with sv.abrir(db) as con:

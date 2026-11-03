@@ -489,11 +489,20 @@ Mitigaciones implementadas:
 - **Botón "GENERAR INFORMES"** en la portada (`/`): genera y ofrece los enlaces
   al HTML y al Excel (`POST /api/informe/generar`; se sirven en `/informes/<archivo>`).
 - CLI: `python -m src.plan_b_main informe-dia [--fecha AAAA-MM-DD]`.
+- **Botón "CERRAR EL DÍA"** en la portada: libera las reservas que quedaron
+  colgando (tareas pendientes que no se pickearon) y genera el informe de cierre.
+  `picking.cerrar_dia()` marca las pendientes como `cerrada` y libera su reserva.
+  NO toca lo pickeado (eso ya salió físicamente). Sin esto, las reservas se
+  arrastran al día siguiente y el disponible queda artificialmente bajo.
 
 ### SKU nuevos (producto que va llegando)
 - Llega mercadería que **no venía en la cuadratura** (producto nuevo). En vez de
   rechazarla, se da de alta: `recepcion.crear_sku()` → tabla `sku_nuevos` + entra
   al stock vivo. `recepcion.skus_nuevos()`.
+- ⚠️ **REGLA (usuario): el producto nuevo entra a ALMACENAMIENTO, NUNCA a PICKING.**
+  Un producto que recién llega no tiene ubicación de picking asignada: primero se
+  guarda en altura y después el reaprovisionamiento lo baja al picking. Hay tests
+  que lo blindan (`test_sku_nuevo_entra_a_almacenamiento_no_a_picking`).
 - En la pantalla de recepción aparece el botón **"+ DAR DE ALTA ESTE SKU"** cuando
   el SKU escaneado no está en el stock (`origen: "codigo"`).
 - CLI: `python -m src.plan_b_main recepcion --sku-nuevo 700809 --cantidad 198 ...`.
@@ -519,9 +528,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **145 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **153 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (11).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (19).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

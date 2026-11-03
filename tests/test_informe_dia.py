@@ -159,3 +159,95 @@ def test_generar_html_y_excel(db, tmp_path):
     assert "Informe del día" in texto
     assert "Ubicaciones tocadas" in texto
     assert xlsx.exists() and xlsx.stat().st_size > 0
+
+
+# --------------------------------------------------------------------------
+# Producto nuevo: entra a ALMACENAMIENTO, nunca a PICKING
+# --------------------------------------------------------------------------
+
+def test_sku_nuevo_entra_a_almacenamiento_no_a_picking(db):
+    """REGLA: un producto que recien llega NO tiene ubicacion de picking.
+
+    Primero se guarda en altura (almacenamiento); despues el reaprovisionamiento
+    lo baja al picking cuando corresponda.
+    """
+    rc.crear_sku(db, sku="700809", cantidad=198, ubicacion="C16-01-01-01",
+                 lpn="LPN1", fecha_vencimiento="01/12/2027")
+    with sv.abrir(db) as con:
+        f = con.execute(
+            f"SELECT area FROM {sv.TABLA} WHERE sku_clave = ?", ("700809",)
+        ).fetchone()
+    assert f["area"] == sv.AREA_ALMACENAMIENTO
+    assert f["area"] != "AREA PICKING"
+
+
+def test_sku_nuevo_no_aparece_en_las_tareas_de_picking(db):
+    """El generador de tareas solo toma AREA PICKING: el nuevo no debe salir."""
+    rc.crear_sku(db, sku="700809", cantidad=500, ubicacion="C16-01-01-01",
+                 lpn="LPN1", fecha_vencimiento="01/12/2027")
+    creadas, reservadas, _ = pk.destinar(
+        db, pd.DataFrame([("700809", 100)], columns=["sku_clave", "cajas"]))
+    assert creadas == 0, "un SKU nuevo en almacenamiento no debe generar picking"
+    assert reservadas == 0
+
+
+def test_sku_nuevo_si_sirve_para_reaprovisionar(db):
+    """En almacenamiento SI queda disponible (para reapro o para picking con flag)."""
+    rc.crear_sku(db, sku="700809", cantidad=100, ubicacion="C16-01-01-01",
+                 lpn="LPN1", fecha_vencimiento="01/12/2027")
+    with sv.abrir(db) as con:
+        filas = sv.filas_disponibles(con, "700809", incluir_almacenamiento=True)
+    assert len(filas) == 1
+
+
+def test_crear_sku_reporta_el_area(db):
+    r = rc.crear_sku(db, sku="700809", cantidad=10, ubicacion="C16-01-01-01")
+    assert r["area"] == sv.AREA_ALMACENAMIENTO
+
+
+# --------------------------------------------------------------------------
+# Cierre del dia
+# --------------------------------------------------------------------------
+
+def test_cerrar_dia_libera_las_reservas_colgando(db):
+    """Lo no pickeado vuelve a estar disponible al cerrar el dia."""
+    pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
+    antes = sv.resumen(db)
+    assert antes["reservado"] == 10
+
+    cierre = pk.cerrar_dia(db, "SUPERVISOR")
+    assert cierre["ok"] is True
+    assert cierre["tareas_cerradas"] == 1
+    assert cierre["cajas_liberadas"] == 10
+
+    despues = sv.resumen(db)
+    assert despues["reservado"] == 0
+    assert despues["disponible"] == antes["disponible"] + 10
+
+
+def test_cerrar_dia_no_toca_lo_pickeado(db):
+    """Lo que ya se pickeo salio fisicamente: no se libera ni se borra."""
+    pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
+    t = pk.tarea_pendiente(db)
+    pk.confirmar(db, t["id"], 10, "P1")
+
+    cierre = pk.cerrar_dia(db, "SUPERVISOR")
+    assert cierre["tareas_cerradas"] == 0        # ya no habia pendientes
+    r = sv.resumen(db)
+    assert r["pickeado"] == 10
+    assert r["reservado"] == 0
+
+
+def test_cerrar_dia_marca_las_tareas_como_cerradas(db):
+    pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
+    pk.cerrar_dia(db, "SUPERVISOR")
+    assert pk.tarea_pendiente(db) is None
+    assert "cerrada" in pk.resumen_tareas(db)
+
+
+def test_cerrar_dia_dos_veces_no_rompe(db):
+    pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
+    pk.cerrar_dia(db, "S1")
+    segunda = pk.cerrar_dia(db, "S1")
+    assert segunda["ok"] is True
+    assert segunda["tareas_cerradas"] == 0

@@ -469,6 +469,11 @@ def crear_sku(db: str | Path, sku: str, descripcion: str = "",
     Caso real: llega un producto nuevo, que no estaba en el stock capturado. En
     vez de rechazarlo, se registra en la tabla `sku_nuevos` y se ingresa al stock
     vivo. Asi el sistema queda completo y despues se cuadra con Blue Yonder.
+
+    ⚠️ REGLA (confirmada por el usuario): el producto nuevo entra al stock en
+    **ALMACENAMIENTO**, nunca en PICKING. Un producto que recien llega no tiene
+    ubicacion de picking asignada; primero se guarda en altura y despues el
+    reaprovisionamiento lo baja al picking cuando corresponda.
     """
     from .externos import clave_sku
 
@@ -498,7 +503,8 @@ def crear_sku(db: str | Path, sku: str, descripcion: str = "",
              cantidad, lpn, venc),
         )
 
-        # Entra al stock vivo (en RECEPCION o directo a la ubicacion indicada)
+        # Entra al stock vivo SIEMPRE en ALMACENAMIENTO (nunca en picking).
+        # Si todavia no se sabe donde va, queda en RECEPCION para ubicarlo luego.
         if cantidad > 0:
             sv.ingresar(
                 con,
@@ -512,7 +518,8 @@ def crear_sku(db: str | Path, sku: str, descripcion: str = "",
             )
 
     return {"ok": True, "sku": sku, "cantidad": cantidad,
-            "ubicacion": ubicacion or sv.AREA_RECEPCION, "nuevo": True}
+            "ubicacion": ubicacion or sv.AREA_RECEPCION, "nuevo": True,
+            "area": sv.AREA_ALMACENAMIENTO if ubicacion else sv.AREA_RECEPCION}
 
 
 def skus_nuevos(db: str | Path) -> pd.DataFrame:
