@@ -281,8 +281,9 @@ python -m src.plan_b_main informe
 | 0 Captura del stock (Detalle) | ✅ existe (`inspeccionar_detalle.py`) |
 | 1 Visor offline (SQLite + consultas) | ✅ implementado |
 | 3 Reaprovisionamiento (mín/máx) | ✅ implementado (falta capacidad) |
-| 2 Picking FEFO | ⏳ falta: origen de los PEDIDOS (TRUCK) |
+| 2 Picking FEFO | 🟡 falta: asignación FEFO (la venta/TRUCK ya está) |
 | 4 Reincorporación al sistema | ⏳ falta: cómo se reingresan los datos |
+| 6 Contraste venta vs stock vs tránsito | ✅ implementado (`src/contraste.py`) |
 
 ---
 
@@ -296,10 +297,58 @@ Documento maestro: `docs/PLAN_B_diseno_completo.md`.
 | 1 | **Cuadratura de Stock** (Detalle) | stock real, lote, vencimiento (FEFO) | Blue Yonder | ✅ |
 | 2 | **Operaciones de reabastecimiento** | mínimo y máximo por ubicación | Blue Yonder | ✅ |
 | 3 | **Mantenimiento de ubicaciones** | capacidad máx/usada/pendiente, tipo, zona, recogible, reabastecimiento (73 col, 11.939 filas) | Blue Yonder | 🟡 copiado en ajuste |
-| 4 | **TRUCK** (programa externo) | la **VENTA** (demanda) | Externo | ⏳ falta archivo de ejemplo |
-| 5 | **Mercadería en tránsito** (con nº de OCA) | lo que viene en camino | **SAP** | ⏳ falta archivo de ejemplo |
+| 4 | **TRUCK** (programa externo) | la **VENTA** (demanda) | Externo | ✅ formato real recibido |
+| 5 | **Mercadería en tránsito** (con nº de OCA) | lo que viene en camino | **SAP** | ✅ formato real recibido |
 
 > ⚠️ TRUCK y SAP son **EXTERNOS** (no se capturan de Blue Yonder).
+
+### ✅ FORMATO REAL DE LOS ARCHIVOS EXTERNOS (2026-11-03)
+
+Ambos llegaron por GitHub (rama `main` del repo). **Llave de cruce: el SKU**
+(`cuadratura.prtnum` = `TRUCK.PRODUCTO` = `SAP.Material`), normalizado con
+`externos.clave_sku()` (quita ceros a la izquierda: "000622" == "622").
+Se verificó que las descripciones coinciden, así que la llave es correcta.
+
+**VENTA — TRUCK** (`ExcelPreventaBIARRIAG (75).csv`)
+- CSV con **separador `;`** y encoding **UTF-8**. 44 columnas.
+- ⚠️ Trae **miles de filas totalmente vacías al final** (33.127 de 33.521 en la
+  muestra) → hay que descartarlas.
+- Columnas útiles: `PRODUCTO` (SKU), `DESCRIPCION.4` (descripción), `CANTIDAD`
+  (cajas), `UNIDAD` (CJ/CU), `FECHA` (dd/mm/aaaa), `ESTADO` (ING/LIQ),
+  `CATEGORIA`, `MARCA`, `TAMAÑO`, `CAMION`, `VIAJE`, `PLANILLA`, `ID-CLIENTE`,
+  `RAZON SOCIAL`.
+
+**TRÁNSITO — SAP** (`IFAC SAP TRANSITO DE PRODUCTOS.xlsx`)
+- Excel `.xlsx`, **hoja `Data`**, 52 columnas.
+- Columnas útiles: `Material` (SKU), `Texto breve material` (descripción),
+  `Cantidad Entrega` (cajas), `Cantidad Pallet`, `OCA(Orden de Carga)` 🔑,
+  `Id.1 / OCA`, `Nº de transporte`, `Centro Origen/Destino`, `Fecha`,
+  `Clase de movimiento` (101 = traslado), `Stat.global transp.` (6/7),
+  `Grupo de artículos`, `Sociedad`.
+
+**Módulos que los leen** (`src/externos.py`)
+- `leer_venta(bytes|str)` → `Venta`; `demanda_por_sku()`, `.guardar/.cargar`.
+- `leer_transito(bytes)` → `Transito`; `por_oca()`, `en_camino_por_sku()`, `.guardar/.cargar`.
+- `clave_sku(valor)` → llave normalizada.
+- Tablas SQLite: `venta` y `transito` (además de `stock` y `minmax`).
+
+**Contraste** (`src/contraste.py`)
+- `calcular(stock, venta, transito)` → por SKU: `demanda`, `picking`, `almacen`,
+  `transito`, `disponible`, `falta`, `cubre`.
+- `disponible = picking + almacen + transito`; `falta = max(0, demanda - disponible)`.
+- `.quiebres` (SKUs que no alcanzan), `.resumen()` (% cubierto), `.sin_stock`, `.sin_venta`.
+
+### Comandos nuevos
+```bash
+python -m src.plan_b_main venta      --archivo "ExcelPreventaBIARRIAG (75).csv"
+python -m src.plan_b_main transito   --archivo "IFAC SAP TRANSITO DE PRODUCTOS.xlsx"
+python -m src.plan_b_main contraste  [--exportar contraste.csv]
+```
+
+> **Valor demostrado (prueba 2026-11-03):** con la venta real + el tránsito real,
+> el contraste detectó 109 SKUs en quiebre, pero **24 de ellos se cubrían
+> justamente con la mercadería en tránsito de SAP** (ej. KUNSTMANN TOROBAYO KEG30L:
+> demanda 21, stock 0, tránsito 1040). Ese es el aporte del módulo.
 
 ### 5 procesos
 1. **Contraste** Venta vs Stock → ¿alcanza para abastecer? (TRUCK vs cuadratura)
@@ -382,9 +431,11 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **37 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
-  `test_informe_picking.py` (18), `test_plan_b.py` (12 nuevos).
-- Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅.
+- **48 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+  `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11 nuevos).
+- Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
+- Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
+  `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).
 - Cómo probar sin la app (aquí / Linux):
 ```bash
 python -m src.main --desde-archivo data/muestra.tsv --sin-correo   # dashboard
@@ -401,8 +452,8 @@ PYTHONPATH=. python -m pytest tests/ -q                            # tests
 - [ ] Excel de inventario de ejemplo (datos ficticios)
 - [ ] Columnas exactas del Excel (¿incluye ubicaciones de almacenamiento? ¿máximos?)
 - [ ] Cómo reingresan los datos a Blue Yonder al volver el sistema
-- [ ] Origen de los pedidos durante la contingencia (archivo TRUCK)
-- [ ] Archivo de tránsito (SAP, con nº de OCA)
+- [x] Origen de los pedidos durante la contingencia → **TRUCK** (formato recibido) ✅
+- [x] Archivo de tránsito (SAP, con nº de OCA) → **formato recibido** ✅
 - [ ] Volumen: nº SKUs, ubicaciones, pedidos/día
 - [ ] SO / permisos admin / offline / impresión
 - [ ] **"La última noticia"** que el usuario mencionó (por confirmar)

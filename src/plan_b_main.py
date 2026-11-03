@@ -151,6 +151,76 @@ def cmd_informe(args) -> int:
     return 0
 
 
+def cmd_venta(args) -> int:
+    from . import externos
+
+    v = externos.cargar_venta_desde_archivo(args.archivo)
+    print(f"Venta (TRUCK): {v.filas} lineas validas | descartadas: {v.descartadas}")
+    if v.dataframe.empty:
+        print("[!] No se leyeron lineas. Revisa el CSV.")
+        return 1
+    ruta = v.guardar(args.db)
+    print(f"Guardado en: {ruta.resolve()}")
+    print("\nDemanda por SKU (top 10):")
+    print(v.demanda_por_sku().head(10).to_string(index=False))
+    return 0
+
+
+def cmd_transito(args) -> int:
+    from . import externos
+
+    t = externos.cargar_transito_desde_archivo(args.archivo)
+    print(f"Transito (SAP): {t.filas} lineas validas | descartadas: {t.descartadas}")
+    if t.dataframe.empty:
+        print("[!] No se leyeron lineas. Revisa el Excel.")
+        return 1
+    ruta = t.guardar(args.db)
+    print(f"Guardado en: {ruta.resolve()}")
+    print("\nTransito por OCA (top 10):")
+    print(t.por_oca().head(10).to_string(index=False))
+    return 0
+
+
+def cmd_contraste(args) -> int:
+    from . import contraste, externos
+
+    inventario = _cargar_db(args.db)
+    ruta = Path(args.db)
+    try:
+        venta = externos.Venta.cargar(ruta)
+    except Exception:
+        venta = None
+    try:
+        transito = externos.Transito.cargar(ruta)
+    except Exception:
+        transito = None
+
+    if venta is None:
+        raise SystemExit("No hay venta cargada. Corre: python -m src.plan_b_main venta --archivo <csv>")
+
+    c = contraste.calcular(inventario, venta, transito)
+    r = c.resumen()
+    print(f"Contraste VENTA vs STOCK{' vs TRANSITO' if transito else ''}")
+    print(f"  SKUs con demanda : {r['skus']}")
+    print(f"  Demanda total    : {r['demanda']} cajas")
+    print(f"  Cubierto         : {r['cubierto']} ({r['pct_cubierto']}%)")
+    print(f"  Falta            : {r['falta']} cajas")
+    print(f"  SKUs en quiebre  : {r['quiebres']}")
+
+    q = c.quiebres
+    if not q.empty:
+        print(f"\n⚠️ Quiebres (top {min(20, len(q))}):")
+        print(q.head(20)[["sku", "descripcion", "demanda", "picking",
+                          "almacen", "transito", "falta"]].to_string(index=False))
+
+    if args.exportar:
+        destino = Path(args.exportar)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        c.dataframe.to_csv(destino, index=False, sep=";", encoding="utf-8-sig")
+        print(f"\nDetalle exportado: {destino.resolve()}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Plan B — contingencia offline de Blue Yonder")
     ap.add_argument("--db", default=DB, help=f"Base SQLite (default {DB})")
@@ -187,6 +257,18 @@ def main() -> int:
     p = sub.add_parser("informe", help="Genera el HTML del Plan B")
     p.add_argument("--fecha", default=None)
     p.set_defaults(func=cmd_informe)
+
+    p = sub.add_parser("venta", help="Carga la venta/demanda desde el CSV de TRUCK")
+    p.add_argument("--archivo", required=True)
+    p.set_defaults(func=cmd_venta)
+
+    p = sub.add_parser("transito", help="Carga el transito desde el Excel de SAP")
+    p.add_argument("--archivo", required=True)
+    p.set_defaults(func=cmd_transito)
+
+    p = sub.add_parser("contraste", help="Cruza venta vs stock vs transito (quiebres)")
+    p.add_argument("--exportar", default=None, help="Ruta CSV donde exportar el detalle")
+    p.set_defaults(func=cmd_contraste)
 
     args = ap.parse_args()
     return args.func(args)
