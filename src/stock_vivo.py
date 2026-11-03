@@ -65,10 +65,16 @@ def abrir(db: str | Path):
 # ---------------------------------------------------------------------------
 
 def a_fecha(texto: object):
-    """'dd/mm/aaaa HH:MM:SS' -> datetime. Devuelve datetime.max si no se entiende."""
+    """Convierte la fecha a datetime para ordenar FEFO de verdad.
+
+    Acepta el formato de la cuadratura (dd/mm/aaaa) y tambien el de la TARJA
+    (dd.mm.aaaa). Ordenar estas fechas como texto es un error: "01/03/2027"
+    quedaria antes que "01/12/2026", o sea elegiria el lote que vence MAS TARDE.
+    """
     if not texto:
         return datetime.max
-    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
+    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y",
+                "%d.%m.%Y %H:%M:%S", "%d.%m.%Y", "%d.%m.%Y %H:%M"):
         try:
             return datetime.strptime(str(texto).strip(), fmt)
         except ValueError:

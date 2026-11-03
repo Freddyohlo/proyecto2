@@ -436,7 +436,25 @@ Mitigaciones implementadas:
   `parsear_ubicacion()` acepta el QR en varios formatos.
 
 ### Recepción (entrada de mercadería)
-- `docs/PLAN_B_recepcion.md` — diseno del flujo (recibir → ubicar) con la tarja real.
+- `docs/PLAN_B_recepcion.md` — diseno del flujo (recibir → ubicar) con la tarja real
+  + propuestas de optimizacion.
+- **TARJA REAL (imagen `IMG_20261103_045905.jpg`, leida por OCR):**
+  LPN/SSCC `278043001201264701` | SKU `700809` | GATO DULCE-DC-VNR1500CCX8-TR |
+  elaboracion `31.10.2026 08:10` | vencimiento `04.06.2027` | cajas reales `198` |
+  cajas/pallet `60` | perfil antiguedad `999` | usuario `RESIDENTE-STG`.
+  - 🔑 El LPN de la tarja es un **SSCC GS1** (18 digitos, con digito de control que
+    VALIDA). Se puede detectar un escaneo malo. `recepcion.sscc_valido()`.
+  - 🔑 La tarja imprime las fechas **con PUNTOS** (`31.10.2026`), no barras.
+    Era un BUG: se perdia el vencimiento en silencio -> FEFO ciego. Corregido.
+  - 🔑 **CAJAS REALES (198) vs CAJAS/PALLET (60)** = 3.3 pallets. Sirve para
+    detectar pallet incompleto.
+  - El LPN es **la identidad del bulto en cada tramo**: cambia al llegar al picking
+    (el picking tiene su propio LPN). Por eso no calzaba con la cuadratura.
+  - ✅ NO se valida contra el transito de SAP: si la mercaderia llega, se recibe
+    y despues se cuadra (criterio del usuario).
+- `recibir_y_ubicar()` — optimizacion: si la tarja ya trae la ubicacion, se recibe
+  y se ubica en UN paso (boton "RECIBIR Y UBICAR").
+- Portada con menu en `/` (Pickear / Recibir / Ver estado); picking en `/picking`.
 - `src/recepcion.py` — `recibir()` (idempotente por LPN), `ubicar()` (conserva
   lote y vencimiento), `sugerir_ubicacion()`, `pendientes()`, `resumen()`.
   Pantalla: `http://<IP>:8080/recepcion`.
@@ -466,9 +484,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **95 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **107 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (15).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

@@ -84,9 +84,18 @@ def _post(url, datos):
         return json.loads(r.read())
 
 
-def test_pagina_responde(servidor):
+def test_portada_es_el_menu(servidor):
+    """La raiz es la portada con menu (mas simple para el operario)."""
     base, _ = servidor
     with urllib.request.urlopen(base + "/") as r:
+        html = r.read().decode()
+    assert r.status == 200
+    assert "PICKEAR" in html and "RECIBIR MERCADERIA" in html
+
+
+def test_pantalla_de_picking_responde(servidor):
+    base, _ = servidor
+    with urllib.request.urlopen(base + "/picking") as r:
         html = r.read().decode()
     assert r.status == 200
     assert "Picking" in html

@@ -44,8 +44,15 @@ TABLA_UBICACIONES = "ubicaciones"
 # ---------------------------------------------------------------------------
 
 def normalizar_fecha(texto: object) -> str:
-    """Acepta 'dd/mm/aaaa' o 'dd-mm-aaaa' (con hora opcional) y devuelve dd/mm/aaaa.
+    """Normaliza la fecha al formato interno dd/mm/aaaa.
 
+    La TARJA IMPRESA usa PUNTOS (31.10.2026, 04.06.2027), no barras: es el
+    formato real de Blue Yonder. Se aceptan todas estas variantes:
+        31.10.2026        (tarja)      -> 31/10/2026
+        31.10.2026 08:10  (con hora)   -> 31/10/2026
+        31/10/2026        (con barras) -> 31/10/2026
+        31-10-2026        (con guiones)-> 31/10/2026
+        2026-10-31        (ISO)        -> 31/10/2026
     Devuelve "" si no se entiende. El vencimiento es critico para FEFO: mejor
     dejarlo vacio y avisar, que guardar una fecha mal.
     """
@@ -54,12 +61,38 @@ def normalizar_fecha(texto: object) -> str:
     t = str(texto).strip()
     if not t:
         return ""
-    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y",
+                "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y",
+                "%d-%m-%Y %H:%M:%S", "%d-%m-%Y",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
             return datetime.strptime(t, fmt).strftime("%d/%m/%Y")
         except ValueError:
             continue
     return ""
+
+
+# ---------------------------------------------------------------------------
+# SSCC: el LPN de la tarja es un codigo GS1 estandar
+# ---------------------------------------------------------------------------
+
+def digito_control_sscc(sscc: str) -> int | None:
+    """Calcula el digito de control de un SSCC (modulo 10, GS1).
+
+    Devuelve None si no es un SSCC de 18 digitos.
+    """
+    if not sscc or len(sscc) != 18 or not sscc.isdigit():
+        return None
+    suma = 0
+    for i, d in enumerate(reversed(sscc[:-1])):
+        suma += int(d) * (3 if i % 2 == 0 else 1)
+    return (10 - (suma % 10)) % 10
+
+
+def sscc_valido(sscc: str) -> bool:
+    """True si el SSCC tiene 18 digitos y su digito de control es correcto."""
+    esperado = digito_control_sscc(sscc)
+    return esperado is not None and esperado == int(sscc[-1])
 
 
 @dataclass
@@ -72,6 +105,8 @@ class Recepcion:
     descripcion: str = ""
     fecha_elaboracion: str = ""
     fecha_vencimiento: str = ""
+    cajas_pallet: int = 0          # "CAJAS / PALLET" de la tarja
+    perfil_antiguedad: str = ""    # "PERFIL DE ANTIGUEDAD" de la tarja
     usuario: str = ""
     fecha: str = ""
 
@@ -86,6 +121,15 @@ class Recepcion:
             malos.append("cantidad")
         return malos
 
+    def pallets_completos(self) -> float:
+        """Cuantos pallets representa (cajas reales / cajas por pallet).
+
+        Ej. de la tarja: 198 cajas reales, 60 por pallet -> 3.3 pallets.
+        """
+        if not self.cajas_pallet:
+            return 0.0
+        return round(self.cantidad / self.cajas_pallet, 2)
+
 
 # ---------------------------------------------------------------------------
 # Tablas
@@ -99,7 +143,8 @@ def preparar_tablas(con: sqlite3.Connection) -> None:
             descripcion TEXT, cantidad INTEGER, almacen TEXT,
             ubicacion_sugerida TEXT, ubicacion_final TEXT,
             fecha_elaboracion TEXT, fecha_vencimiento TEXT,
-            estado TEXT NOT NULL DEFAULT 'recibido'
+            cajas_pallet INTEGER DEFAULT 0, perfil_antiguedad TEXT,
+            sscc_ok INTEGER, estado TEXT NOT NULL DEFAULT 'recibido'
         )
     """)
     con.execute(f"""
@@ -122,18 +167,27 @@ def recibir(db: str | Path, recepcion: Recepcion) -> dict:
     """Registra la mercaderia recibida. Queda en RECEPCION, lista para ubicar.
 
     Idempotente por LPN: si el mismo LPN ya se recibio, NO se duplica (devuelve
-    el registro existente). Evita el doble ingreso si el picker escanea dos veces.
+    el registro existente). Evita el doble ingreso si el operario escanea dos veces.
+
+    NO se valida contra el transito de SAP: si la mercaderia esta llegando, es
+    porque llega; se recibe y despues se cuadra (criterio del usuario).
     """
     malos = recepcion.faltantes()
     if malos:
         return {"ok": False, "error": f"faltan datos: {', '.join(malos)}", "code": 400}
 
+    # Normaliza las fechas aca adentro, para que valga sin importar quien llame
+    # (la tarja las trae con puntos: 31.10.2026).
+    fecha_venc = normalizar_fecha(recepcion.fecha_vencimiento)
+    fecha_elab = normalizar_fecha(recepcion.fecha_elaboracion)
+
     momento = recepcion.fecha or datetime.now().isoformat(timespec="seconds")
+    # El SSCC tiene digito de control: si no cuadra, el escaneo vino mal.
+    sscc_ok = 1 if sscc_valido(recepcion.lpn) else 0
 
     with sv.abrir(db) as con:
         preparar_tablas(con)
 
-        # Idempotencia: mismo LPN no se recibe dos veces.
         ya = con.execute(
             f"SELECT * FROM {TABLA_RECEPCION} WHERE lpn = ?", (recepcion.lpn,)
         ).fetchone()
@@ -147,15 +201,15 @@ def recibir(db: str | Path, recepcion: Recepcion) -> dict:
             f"""INSERT INTO {TABLA_RECEPCION}
                 (fecha, usuario, lpn, sku, sku_clave, descripcion, cantidad,
                  almacen, ubicacion_sugerida, fecha_elaboracion, fecha_vencimiento,
-                 estado)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,'recibido')""",
+                 cajas_pallet, perfil_antiguedad, sscc_ok, estado)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'recibido')""",
             (momento, recepcion.usuario, recepcion.lpn, recepcion.sku, clave,
              recepcion.descripcion, recepcion.cantidad, recepcion.almacen,
-             recepcion.ubicacion, recepcion.fecha_elaboracion,
-             recepcion.fecha_vencimiento),
+             recepcion.ubicacion, fecha_elab,
+             fecha_venc, recepcion.cajas_pallet,
+             recepcion.perfil_antiguedad, sscc_ok),
         )
 
-        # Entra al stock vivo en RECEPCION (aun sin ubicacion final).
         sv.ingresar(
             con,
             ubicacion=sv.AREA_RECEPCION,
@@ -164,12 +218,20 @@ def recibir(db: str | Path, recepcion: Recepcion) -> dict:
             lpn=recepcion.lpn,
             descripcion=recepcion.descripcion,
             area=sv.AREA_RECEPCION,
-            fecha_caducidad=recepcion.fecha_vencimiento,
+            fecha_caducidad=fecha_venc,
         )
+
+    avisos = []
+    if not fecha_venc:
+        avisos.append("sin fecha de vencimiento: FEFO no podra ordenar este lote")
+    if not sscc_ok and len(recepcion.lpn) == 18:
+        avisos.append(f"el SSCC {recepcion.lpn} no pasa el digito de control (posible mala lectura)")
 
     return {"ok": True, "lpn": recepcion.lpn, "sku": recepcion.sku,
             "cantidad": recepcion.cantidad,
-            "aviso_vencimiento": not recepcion.fecha_vencimiento}
+            "aviso_vencimiento": not fecha_venc,
+            "sscc_ok": bool(sscc_ok), "avisos": avisos,
+            "pallets": recepcion.pallets_completos()}
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +333,41 @@ def ubicar(db: str | Path, id_recepcion: int, ubicacion_final: str,
 # ---------------------------------------------------------------------------
 # Consultas
 # ---------------------------------------------------------------------------
+
+def recibir_y_ubicar(db: str | Path, recepcion: Recepcion,
+                     ubicacion_final: str = "") -> dict:
+    """Recibe y ubica en UN SOLO PASO (optimizacion de operacion).
+
+    Si la tarja ya trae la ubicacion destino (ej. C16-01-01-01), no tiene sentido
+    hacer que el operario confirme dos veces: se recibe y se ubica de una.
+    Si no se pasa ubicacion_final, se usa la de la tarja.
+
+    Devuelve el resultado combinado, mas `paso_unico: True`.
+    """
+    destino = ubicacion_final or recepcion.ubicacion
+    if not destino:
+        return {"ok": False,
+                "error": "sin ubicacion: use recibir() y ubique despues", "code": 400}
+
+    r = recibir(db, recepcion)
+    if not r["ok"]:
+        return r
+
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        fila = con.execute(
+            f"SELECT id FROM {TABLA_RECEPCION} WHERE lpn = ?", (recepcion.lpn,)
+        ).fetchone()
+    if fila is None:
+        return {"ok": False, "error": "no se encontro la recepcion recien creada",
+                "code": 500}
+
+    u = ubicar(db, int(fila["id"]), destino, recepcion.usuario)
+    if not u["ok"]:
+        return u
+
+    return {**r, **u, "ok": True, "paso_unico": True, "ubicacion": destino}
+
 
 def pendientes(db: str | Path) -> pd.DataFrame:
     """Recepciones recibidas pero todavia sin ubicar."""

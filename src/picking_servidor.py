@@ -33,6 +33,67 @@ from . import picking as pk
 
 DB_DEFECTO = "data/plan_b.sqlite"
 
+PAGINA_MENU = """<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Contingencia</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px;
+         background: #0b1220; color: #e6edf7; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p { color: #93a4bf; font-size: 15px; margin: 0 0 20px; }
+  a { display: block; text-decoration: none; color: #fff; border-radius: 16px;
+      padding: 26px 20px; margin-bottom: 14px; font-size: 26px; font-weight: 800; }
+  a small { display: block; font-size: 15px; font-weight: 400; opacity: .85; margin-top: 6px; }
+  .picking { background: #1d4ed8; }
+  .recepcion { background: #15803d; }
+  .estado { background: #334155; font-size: 19px; padding: 18px 20px; }
+  #resumen { font-size: 15px; color: #cbd8ea; margin-top: 10px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<h1>Plan B — contingencia</h1>
+<p>Blue Yonder caido. Elija que va a hacer:</p>
+
+<a class="picking" href="/picking">PICKEAR
+  <small>Ir a la ubicacion que le indique y confirmar</small></a>
+
+<a class="recepcion" href="/recepcion">RECIBIR MERCADERIA
+  <small>Escanear la tarja del pallet que llego</small></a>
+
+<a class="estado" href="#" onclick="verEstado(); return false;">VER ESTADO
+  <small>Stock, tareas y recepcion del dia</small></a>
+
+<div class="estado" id="cajaEstado" style="display:none;">
+  <div id="resumen"></div>
+</div>
+
+<script>
+async function verEstado() {
+  const r = await fetch('/api/estado');
+  const j = await r.json();
+  const s = j.stock || {}, t = j.tareas || {}, rec = j.recepcion || {};
+  $('resumen').innerHTML =
+    '<b>Stock vivo</b><br>' +
+    'Total ' + s.total + ' | reservado ' + s.reservado +
+    ' | pickeado ' + s.pickeado + ' | disponible ' + s.disponible + '<br><br>' +
+    '<b>Tareas</b><br>' +
+    'Pendientes ' + (t.pendiente ? t.pendiente.cajas : 0) + ' cajas | ' +
+    'ok ' + (t.ok ? t.ok.cajas : 0) + ' | parcial ' + (t.parcial ? t.parcial.cajas : 0) + '<br><br>' +
+    '<b>Recepcion</b><br>' +
+    'Recibidas ' + rec.recepciones + ' (' + rec.cajas + ' cajas) | ' +
+    'pendientes de ubicar ' + rec.pendientes + (rec.sin_vencimiento ? ' | ⚠️ ' + rec.sin_vencimiento + ' sin vencimiento' : '');
+  $('cajaEstado').style.display = 'block';
+}
+const $ = id => document.getElementById(id);
+</script>
+</body>
+</html>
+"""
+
 PAGINA_RECEPCION = """<!doctype html>
 <html lang="es">
 <head>
@@ -93,11 +154,26 @@ PAGINA_RECEPCION = """<!doctype html>
       </div>
     </div>
 
-    <div class="etq" style="margin-top:10px;">Ubicacion sugerida (de la tarja)</div>
+    <div class="fila" style="margin-top:10px;">
+      <div>
+        <div class="etq">Cajas / pallet</div>
+        <input id="cajasPallet" type="number" inputmode="numeric" placeholder="60">
+      </div>
+      <div>
+        <div class="etq">Perfil antiguedad</div>
+        <input id="perfil" placeholder="999">
+      </div>
+    </div>
+
+    <div class="etq" style="margin-top:10px;">Descripcion</div>
+    <input id="descripcion" placeholder="del producto">
+
+    <div class="etq" style="margin-top:10px;">Ubicacion (de la tarja)</div>
     <input id="ubicacion" placeholder="ej. C16-01-01-01">
   </div>
 
   <button id="btnRecibir" disabled>RECIBIR</button>
+  <button id="btnRecibirUbicar" class="gris" disabled>RECIBIR Y UBICAR (un paso)</button>
 </div>
 
 <div class="tarjeta">
@@ -117,7 +193,8 @@ PAGINA_RECEPCION = """<!doctype html>
 const $ = id => document.getElementById(id);
 const lpn = $('lpn'), sku = $('sku'), cant = $('cantidad'), msg = $('msg');
 const elab = $('elaboracion'), venc = $('vencimiento'), ubic = $('ubicacion');
-const btn = $('btnRecibir'), destino = $('destino');
+const cajasPallet = $('cajasPallet'), perfil = $('perfil'), desc = $('descripcion');
+const btn = $('btnRecibir'), btnRU = $('btnRecibirUbicar'), destino = $('destino');
 let idSeleccion = null;
 
 function aviso(t, c) { msg.className = c || ''; msg.textContent = t; }
@@ -132,32 +209,60 @@ lpn.addEventListener('change', () => {
 
 // Habilita RECIBIR cuando estan los datos minimos
 ['input','change'].forEach(ev => {
-  [sku, cant].forEach(el => el.addEventListener(ev, () => {
-    btn.disabled = !(lpn.value.trim() && sku.value.trim() && parseInt(cant.value || '0') > 0);
+  [sku, cant, ubic].forEach(el => el.addEventListener(ev, () => {
+    const listo = lpn.value.trim() && sku.value.trim() && parseInt(cant.value || '0') > 0;
+    btn.disabled = !listo;
+    btnRU.disabled = !(listo && ubic.value.trim());   // el paso unico necesita ubicacion
   }));
 });
 
-btn.addEventListener('click', async () => {
-  const cuerpo = {
+function cuerpoRecepcion() {
+  return {
     lpn: lpn.value.trim(), sku: sku.value.trim(),
     cantidad: parseInt(cant.value || '0', 10),
     elaboracion: elab.value.trim(), vencimiento: venc.value.trim(),
-    ubicacion: ubic.value.trim(), usuario: 'RECEPTOR',
+    ubicacion: ubic.value.trim(),
+    cajas_pallet: parseInt(cajasPallet.value || '0', 10),
+    perfil_antiguedad: perfil.value.trim(),
+    descripcion: desc.value.trim(),
+    usuario: 'RECEPTOR',
   };
+}
+
+function limpiar() {
+  [lpn, sku, cant, elab, venc, ubic, cajasPallet, perfil, desc].forEach(el => el.value = '');
+  btn.disabled = true; btnRU.disabled = true;
+  $('resto').classList.add('oculto'); lpn.focus();
+}
+
+btnRU.addEventListener('click', async () => {
+  const r = await fetch('/api/recepcion/recibir-y-ubicar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cuerpoRecepcion()),
+  });
+  const j = await r.json();
+  if (!j.ok) { aviso('❌ ' + j.error, 'err'); return; }
+  aviso('✅ Recibido y ubicado: ' + j.cantidad + ' cajas de ' + j.sku +
+        ' en ' + j.ubicacion, 'ok');
+  limpiar(); cargarPendientes();
+});
+
+btn.addEventListener('click', async () => {
+  const cuerpo = cuerpoRecepcion();
   const r = await fetch('/api/recepcion/recibir', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(cuerpo),
   });
   const j = await r.json();
   if (!j.ok) { aviso('❌ ' + j.error, 'err'); return; }
-  aviso(j.aviso_vencimiento
-        ? '⚠️ Recibido sin vencimiento: FEFO no podra ordenar este lote.'
-        : '✅ Recibido: ' + j.cantidad + ' cajas de ' + j.sku, 
-        j.aviso_vencimiento ? 'aviso' : 'ok');
-  lpn.value = ''; sku.value = ''; cant.value = ''; elab.value = ''; venc.value = '';
-  ubic.value = ''; btn.disabled = true; $('resto').classList.add('oculto');
-  lpn.focus();
-  cargarPendientes();
+  if (j.avisos && j.avisos.length) {
+    aviso('⚠️ Recibido: ' + j.cantidad + ' cajas de ' + j.sku + ' — ' + j.avisos.join('; '),
+          'aviso');
+  } else {
+    aviso('✅ Recibido: ' + j.cantidad + ' cajas de ' + j.sku +
+          (j.pallets ? ' (' + j.pallets + ' pallets)' : ''), 'ok');
+  }
+  limpiar(); cargarPendientes();
 });
 
 async function cargarPendientes() {
@@ -463,7 +568,22 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(u.query)
 
         if u.path in ("/", "/index.html"):
+            self._html(PAGINA_MENU)
+            return
+
+        if u.path == "/picking":
             self._html(PAGINA)
+            return
+
+        if u.path == "/api/estado":
+            from . import recepcion as rc
+            from . import stock_vivo as sv
+            self._json({
+                "ok": True,
+                "stock": sv.resumen(self.db),
+                "tareas": pk.resumen_tareas(self.db),
+                "recepcion": rc.resumen(self.db),
+            })
             return
 
         if u.path == "/api/tarea":
@@ -532,20 +652,27 @@ class Handler(BaseHTTPRequestHandler):
             self._json(r)
             return
 
-        if u.path == "/api/recepcion/recibir":
+        if u.path in ("/api/recepcion/recibir", "/api/recepcion/recibir-y-ubicar"):
             from . import recepcion as rc
             datos = self._cuerpo()
-            r = rc.recibir(self.db, rc.Recepcion(
+            recep = rc.Recepcion(
                 lpn=str(datos.get("lpn", "")).strip(),
                 sku=str(datos.get("sku", "")).strip(),
                 cantidad=int(datos.get("cantidad", 0) or 0),
                 ubicacion=str(datos.get("ubicacion", "")).strip(),
                 almacen=str(datos.get("almacen", "")).strip(),
                 descripcion=str(datos.get("descripcion", "")).strip(),
-                fecha_elaboracion=rc.normalizar_fecha(datos.get("elaboracion")),
-                fecha_vencimiento=rc.normalizar_fecha(datos.get("vencimiento")),
+                fecha_elaboracion=str(datos.get("elaboracion", "")).strip(),
+                fecha_vencimiento=str(datos.get("vencimiento", "")).strip(),
+                cajas_pallet=int(datos.get("cajas_pallet", 0) or 0),
+                perfil_antiguedad=str(datos.get("perfil_antiguedad", "")).strip(),
                 usuario=str(datos.get("usuario", "")).strip(),
-            ))
+            )
+            if u.path.endswith("recibir-y-ubicar"):
+                r = rc.recibir_y_ubicar(self.db, recep,
+                                        str(datos.get("ubicacion_final", "")).strip())
+            else:
+                r = rc.recibir(self.db, recep)
             if not r["ok"]:
                 self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
                 return
