@@ -6,26 +6,35 @@
 
 ---
 
-## 0. Correcciones importantes (datos aportados por el usuario)
-
-Tres supuestos míos estaban **mal** y cambian la recomendación:
+## 3. Correcciones importantes (datos aportados por el usuario)
 
 | Supuesto mío | Realidad | Impacto |
 |---|---|---|
 | "Cuando cae el sistema quedamos offline" | **NO.** La caída del WMS es **independiente del WiFi**. Hay puntos de acceso cada pocos metros. | ✅ **Simplifica todo**: no hace falta trabajar sin red ni guardar datos en el dispositivo. |
 | "Velocity es un producto de Blue Yonder" | **NO.** Velocity es el **emulador de terminal (telnet) de Wavelink/Ivanti**. | Cambia la arquitectura: es la capa que habla con BY, y **se le puede cambiar el host**. |
-| "Habría que ver si tienen navegador" | **Sí tienen**: Chrome **y** Enterprise Browser. | Habilita la app web sin fricción. |
+| "Hay que escanear SKU y LPN al pickear" | **NO.** El QR del rack trae **solo la ubicación**, y la **ubicación de picking es única por SKU**. | 🔑 **El escaneo ya identifica el producto.** No se escanea SKU al pickear. |
+| "Los productos tienen código de barras, habrá que escanearlos" | Sí tienen, pero **se escanean solo en RECEPCIÓN** (ahí está la tarja con cantidad y LPN). | El flujo de picking queda más simple. |
+
+### Flujo de picking real (confirmado)
+```
+   El sistema DIRIGE:  "ve a la ubicacion X, saca N cajas"
+        │
+   El picker va y ESCANEA EL QR DEL RACK  (el QR trae solo la ubicacion)
+        │
+   El sistema VERIFICA que sea la ubicacion correcta  ✅ / ❌
+        │
+   Confirma el pick
+```
+**No se escanea el SKU**: como la ubicación de picking es única por SKU, escanear la
+ubicación ya identifica el producto. El escaneo sirve para **verificar que el picker
+está parado en el lugar correcto**, no para elegir el producto.
 
 ### Equipos confirmados
 - **Zebra MC3400** → Android 13 / 14.
 - **Zebra MC330L** (familia MC3300x) → Android 10 / 11 / 13 / 14.
-- Ambos soportan **Chrome** y **Enterprise Browser** (navegador industrial de Zebra,
-  HTML5 + API nativa de escaneo).
-- Ambos corren **Velocity** (emulador telnet) con un menú + login para pickear.
-
-### Los racks tienen **código QR con la ubicación**
-Es lo que los pickeadores pistolean para ubicarse. → El escaneo de ubicación ya
-existe en la operación; nuestro sistema solo tiene que **leer ese mismo QR**.
+- Ambos con **Chrome** y **Enterprise Browser**.
+- El QR del rack **se lee con el láser** del Zebra.
+- **No se involucra a TI**: es un proyecto de los operadores WMS.
 
 ---
 
@@ -51,11 +60,13 @@ Los Zebra quedan encendidos, conectados y con navegador — **sin servidor**.
 ### Opción A — App WEB en Chrome / Enterprise Browser  ⭐ RECOMENDADA
 
 El PC de contingencia levanta un servidor web en la LAN. El picker abre el
-navegador del Zebra (que ya tiene WiFi) → nuestra pantalla → escanea el QR de la
-ubicación → escanea SKU/LPN → confirma.
+navegador del Zebra (que ya tiene WiFi) → el sistema le dice a qué ubicación ir →
+escanea el QR del rack (verificación) → confirma.
 
 ```
    [PC contingencia: servidor web + SQLite]  ◄── WiFi ──  [Zebra: Chrome/EB]
+                    │
+        genera tareas (FEFO)  ──►  "ve a X, saca N cajas"
 ```
 
 - ✅ **No hay que escribir ni distribuir una APK.** Es HTML/JS.
@@ -136,32 +147,33 @@ Ahora todo depende de **una sola máquina**.
 **Mitigación:** IP fija, sin suspensión, respaldo del SQLite, y Opción C (papel)
 como red de seguridad.
 
-### 4.4 El formato del QR de ubicación  ❓ A CONFIRMAR
-Hay que saber **qué contiene** el QR de los racks:
-- ¿El código pelado (`60-001`)?
-- ¿Con prefijo (`LOC:60-001`)?
-- ¿Una URL o JSON?
+### 4.4 El formato del QR de ubicación  ✅ RESUELTO
+El usuario confirmó que el QR **trae solo la ubicación** y se lee con el láser.
+Igual, el parser (`parsear_ubicacion`) tolera variantes por si el formato cambia:
+código pelado, `LOC:`/`UBIC:`, URL con `?loc=`, y `valor|campo`.
 
-**Mitigación:** el parser de ubicación debe ser tolerante (ver `picking_servidor.py`).
+### 4.5 Política de IT  ✅ DESCARTADO
+El usuario indicó que **no se involucra a TI**: es un proyecto de los operadores WMS.
+Eso quita el bloqueo, aunque conviene dejar el sistema lo menos invasivo posible
+(una URL en el navegador, sin instalar nada) para que siga siendo así.
 
-### 4.5 Política de IT
-Instalar apps o cambiar perfiles en equipos corporativos puede chocar con TI.
+### 4.6 Nuevo riesgo: SKU en varias ubicaciones
+El modelo asume **una ubicación de picking por SKU**. Si un SKU tuviera picking en
+varias ubicaciones, "escanear la ubicación" ya no identificaría el producto.
 
-**Mitigación:** validar con TI antes de construir. La Opción A es la de menor
-fricción (no instala nada: es una URL).
+**Mitigación:** el generador de tareas (`picking.py`) **no asume** una sola: recorre
+los lotes ordenados por FEFO y genera una tarea por cada ubicación/lote que toque.
+Si aparece el caso, ya está cubierto.
 
 ---
 
 ## 5. Qué falta confirmar
 
-- [ ] **¿Qué contiene el QR** de la ubicación? (formato exacto)
-- [ ] ¿El QR del rack se puede leer con la cámara o con el láser del Zebra?
-- [ ] ¿El SKU y el LPN **tienen código de barras**? ¿formato?
-- [ ] ¿TI permite una URL/app web en esos equipos?
-- [ ] ¿Cuántos Zebra hay en total (MC3400 / MC330L)?
-- [ ] ¿Los pickeadores están acostumbrados a escanear SKU, o eligen de una lista?
+- [ ] ¿Los pickeadores están acostumbrados a escanear el rack, o a escribir la ubicación?
 - [ ] ¿El PC de contingencia puede tener IP fija en la red de la bodega?
 - [ ] ¿Hay algún MDM (Avalanche) para desplegar el perfil de Velocity (Opción B)?
+- [ ] ¿Cuántos Zebra hay en total (MC3400 / MC330L)?
+- [ ] ¿Se quiere imprimir/exportar la lista de tareas además de verla en el Zebra?
 
 ---
 

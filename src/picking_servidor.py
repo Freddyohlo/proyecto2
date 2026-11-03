@@ -1,20 +1,22 @@
-"""Servidor local de picking para los terminales RF (Zebra Android).
+"""Servidor de picking GUIADO para los terminales RF (Zebra Android).
 
 Levanta una app WEB (no hace falta APK) que corre en el navegador del Zebra.
-El lector de codigos se integra solo: DataWedge de Zebra escribe el codigo como
-si fuera teclado, y la pagina lo captura en el campo que tiene el foco.
+El lector se integra solo: DataWedge (Chrome) o Enterprise Browser escriben el
+codigo como si fuera teclado y la pagina lo captura.
+
+COMO FUNCIONA EL PICKING (confirmado por el usuario, 2026-11-03):
+  - El sistema DIRIGE: "ve a la ubicacion X y saca N cajas".
+  - El picker escanea el QR del rack (que trae SOLO la ubicacion) y el sistema
+    VERIFICA que sea la ubicacion correcta.
+  - NO se escanea el SKU al pickear: la ubicacion de picking es unica por SKU,
+    asi que la ubicacion ya identifica el producto.
+  - Los codigos de barras de producto y LPN se escanean SOLO EN RECEPCION.
 
 Uso:
-    python -m src.picking_servidor [--puerto 8080] [--db data/plan_b.sqlite]
+    python -m src.picking_servidor --puerto 8080 --db data/plan_b.sqlite
 
-Luego, en el Zebra (mismo WiFi), abrir:
+Y en el Zebra (mismo WiFi):
     http://<IP-del-PC>:8080/
-
-El flujo de picking es: escanear ubicacion -> escanear SKU/LPN -> cantidad ->
-confirmar. Cada movimiento se guarda en SQLite (tabla 'picking') para reingresarlo
-a Blue Yonder cuando vuelva.
-
-NOTA: esto es un PROTOTIPO para validar el concepto con un solo Zebra.
 """
 
 from __future__ import annotations
@@ -36,147 +38,188 @@ PAGINA = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>Picking contingencia</title>
 <style>
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 12px;
          background: #0b1220; color: #e6edf7; font-size: 20px; }
-  h1 { font-size: 22px; margin: 0 0 12px; }
-  .paso { background: #16233a; border-radius: 12px; padding: 14px; margin-bottom: 12px;
-          border-left: 6px solid #2b3d5c; }
-  .paso.activo { border-left-color: #38bdf8; background: #1b2c48; }
-  .paso.listo { border-left-color: #22c55e; }
-  label { display: block; font-size: 15px; color: #93a4bf; margin-bottom: 6px; }
-  input { width: 100%; font-size: 26px; padding: 14px; border-radius: 10px;
+  h1 { font-size: 20px; margin: 0 0 10px; color: #93a4bf; font-weight: 600; }
+
+  #progreso { font-size: 16px; color: #93a4bf; margin-bottom: 10px; }
+
+  .tarjeta { background: #16233a; border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .destino { border-left: 8px solid #38bdf8; }
+  .destino .etq { font-size: 15px; color: #93a4bf; }
+  .destino .valor { font-size: 52px; font-weight: 800; line-height: 1.05; margin: 4px 0; }
+  .destino .prod { font-size: 19px; color: #cbd8ea; }
+  .destino .cant { font-size: 34px; font-weight: 800; color: #4ade80; margin-top: 6px; }
+  .destino .lote { font-size: 15px; color: #93a4bf; margin-top: 6px; }
+
+  input { width: 100%; font-size: 26px; padding: 16px; border-radius: 12px;
           border: 2px solid #2b3d5c; background: #0b1220; color: #e6edf7; }
   input:focus { outline: none; border-color: #38bdf8; }
-  .dato { font-size: 26px; font-weight: 700; padding: 14px; min-height: 58px;
-          border-radius: 10px; background: #0b1220; border: 2px dashed #2b3d5c; }
-  .ok { color: #4ade80; }
-  .err { color: #f87171; }
-  .fila { display: flex; gap: 10px; }
-  .fila > * { flex: 1; }
-  button { width: 100%; font-size: 24px; font-weight: 700; padding: 18px;
-           border: 0; border-radius: 12px; background: #2563eb; color: #fff;
-           margin-top: 8px; }
-  button:disabled { background: #334155; color: #94a3b8; }
-  button.gris { background: #475569; }
-  #msg { margin-top: 12px; padding: 12px; border-radius: 10px; min-height: 48px;
-         font-size: 18px; background: #16233a; }
+
+  button { width: 100%; font-size: 26px; font-weight: 800; padding: 20px;
+           border: 0; border-radius: 12px; color: #fff; margin-top: 10px; }
+  #btnOk { background: #16a34a; }
+  #btnOk:disabled { background: #334155; color: #94a3b8; }
+  .gris { background: #475569; font-size: 18px; padding: 14px; }
+
+  #msg { padding: 14px; border-radius: 12px; min-height: 52px; font-size: 18px;
+         background: #16233a; margin-bottom: 12px; }
+  #msg.ok { background: #14532d; color: #bbf7d0; }
+  #msg.err { background: #7f1d1d; color: #fecaca; }
+
+  #hecho { text-align: center; padding: 40px 10px; }
+  #hecho .big { font-size: 64px; }
   .oculto { display: none; }
-  table { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 10px; }
-  th, td { text-align: left; padding: 6px; border-bottom: 1px solid #2b3d5c; }
 </style>
 </head>
 <body>
-<h1>Picking — contingenciа</h1>
 
-<div class="paso activo" id="p1">
-  <label>1. Ubicacion</label>
-  <input id="ubicacion" autocomplete="off" autofocus placeholder="escanee ubicacion">
-</div>
+<h1>Picking — contingencia</h1>
+<div id="progreso"></div>
 
-<div class="paso" id="p2">
-  <label>2. SKU o LPN</label>
-  <input id="sku" autocomplete="off" placeholder="escanee SKU o LPN" disabled>
-</div>
+<div id="msg">Cargando tarea...</div>
 
-<div class="paso" id="p3">
-  <label>3. Cantidad</label>
-  <div class="fila">
-    <input id="cantidad" type="number" inputmode="numeric" value="1" disabled>
-    <button id="btnOk" disabled>CONFIRMAR</button>
+<div id="trabajo" class="oculto">
+  <div class="tarjeta destino">
+    <div class="etq">Vaya a la ubicacion</div>
+    <div class="valor" id="dUbic">—</div>
+    <div class="prod" id="dProd">—</div>
+    <div class="cant" id="dCant">—</div>
+    <div class="lote" id="dLote"></div>
+  </div>
+
+  <div class="tarjeta">
+    <div class="etq" style="font-size:15px;color:#93a4bf;margin-bottom:8px;">
+      Escanee el QR del rack para confirmar
+    </div>
+    <input id="scan" autocomplete="off" placeholder="escaneando..." autofocus>
+    <button id="btnOk" disabled>CONFIRMAR PICK</button>
+    <button id="btnSaltar" class="gris">Saltar tarea</button>
   </div>
 </div>
 
-<div id="msg">Escanee una ubicacion para empezar.</div>
-
-<div class="paso">
-  <label>Ultimos movimientos</label>
-  <table id="hist"><tbody></tbody></table>
+<div id="hecho" class="oculto">
+  <div class="big">✅</div>
+  <div>No quedan tareas pendientes.</div>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
-const ubic = $('ubicacion'), sku = $('sku'), cant = $('cantidad'), msg = $('msg');
-const btn = $('btnOk');
-let ubicacionReal = '';   // la ubicacion ya parseada (el QR puede traer prefijos)
+const scan = $('scan'), msg = $('msg'), btnOk = $('btnOk'), btnSaltar = $('btnSaltar');
+let tarea = null;
 
 function aviso(texto, clase) {
   msg.className = clase || '';
   msg.textContent = texto;
 }
 
-function paso(n, activo) {
-  const el = $('p' + n);
-  el.classList.toggle('activo', activo);
-  el.classList.toggle('listo', !activo && n < pasoActual);
+async function cargarTarea() {
+  const r = await fetch('/api/tarea');
+  const j = await r.json();
+  if (!j.ok) {
+    $('trabajo').classList.add('oculto');
+    $('hecho').classList.remove('oculto');
+    $('progreso').textContent = '';
+    return;
+  }
+  tarea = j.tarea;
+  $('hecho').classList.add('oculto');
+  $('trabajo').classList.remove('oculto');
+  $('dUbic').textContent = tarea.ubicacion;
+  $('dProd').textContent = tarea.descripcion || tarea.sku;
+  $('dCant').textContent = tarea.cantidad + ' cajas';
+  $('dLote').textContent = (tarea.lote ? 'Lote ' + tarea.lote : '') +
+                           (tarea.caducidad ? '  |  vence ' + tarea.caducidad : '');
+  $('progreso').textContent = 'Tarea ' + (j.hechas + 1) + ' de ' + j.total;
+  scan.value = ''; scan.disabled = false; btnOk.disabled = true;
+  aviso('Vaya a ' + tarea.ubicacion + ' y escanee el QR del rack.');
+  scan.focus();
 }
-let pasoActual = 1;
 
-// DataWedge / Enterprise Browser escriben el codigo y mandan ENTER -> 'change'
-ubic.addEventListener('change', async () => {
-  const v = ubic.value.trim();
-  if (!v) return;
-  const r = await fetch('/api/ubicacion?codigo=' + encodeURIComponent(v));
-  const j = await r.json();
-  if (!j.ok) { aviso('Ubicacion no encontrada: ' + v, 'err'); ubic.select(); return; }
-  ubicacionReal = j.ubicacion;
-  aviso('Ubicacion ' + ubicacionReal + ' — ' + j.skus + ' SKUs disponibles. Escanee el SKU.', 'ok');
-  ubic.disabled = true; sku.disabled = false; sku.focus();
-  pasoActual = 2; paso(1, false); paso(2, true);
+// El escaner escribe el codigo y manda ENTER -> 'change'
+scan.addEventListener('change', () => {
+  const v = scan.value.trim();
+  if (!v || !tarea) return;
+  // El QR trae solo la ubicacion; verificamos contra la ubicacion esperada
+  fetch('/api/verificar?ubicacion=' + encodeURIComponent(tarea.ubicacion) +
+        '&codigo=' + encodeURIComponent(v))
+    .then(r => r.json())
+    .then(j => {
+      if (!j.ok) {
+        aviso('❌ Ubicacion equivocada: ' + (j.leida || v) +
+              '. Deberia ser ' + tarea.ubicacion + '.', 'err');
+        scan.select();
+        return;
+      }
+      aviso('✅ Ubicacion correcta. Confirme el pick.', 'ok');
+      scan.disabled = true; btnOk.disabled = false;
+    });
 });
 
-sku.addEventListener('change', async () => {
-  const v = sku.value.trim();
-  if (!v) return;
-  const r = await fetch('/api/sku?ubicacion=' + encodeURIComponent(ubicacionReal) +
-                        '&codigo=' + encodeURIComponent(v));
-  const j = await r.json();
-  if (!j.ok) { aviso('SKU/LPN no encontrado en esa ubicacion: ' + v, 'err'); sku.select(); return; }
-  aviso('OK: ' + j.descripcion + ' | disponible ' + j.disponible +
-        ' | vence ' + j.caducidad, 'ok');
-  sku.disabled = true; cant.disabled = false; btn.disabled = false; cant.focus();
-  pasoActual = 3; paso(2, false); paso(3, true);
-});
-
-btn.addEventListener('click', async () => {
-  const cuerpo = {
-    ubicacion: ubicacionReal,
-    codigo: sku.value.trim(),
-    cantidad: parseInt(cant.value || '0', 10),
-    usuario: 'RESIDENTE-STG',
-  };
+btnOk.addEventListener('click', async () => {
   const r = await fetch('/api/confirmar', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(cuerpo),
+    body: JSON.stringify({id: tarea.id, usuario: 'RESIDENTE-STG'}),
   });
   const j = await r.json();
   if (!j.ok) { aviso('Error: ' + j.error, 'err'); return; }
-  aviso('Confirmado: ' + cuerpo.cantidad + ' x ' + j.sku + ' desde ' + cuerpo.ubicacion, 'ok');
-  agregarHist(cuerpo, j);
-  // reiniciar
-  ubic.value = ''; sku.value = ''; cant.value = 1; ubicacionReal = '';
-  ubic.disabled = false; sku.disabled = true; cant.disabled = true; btn.disabled = true;
-  pasoActual = 1; paso(1, true); paso(2, false); paso(3, false);
-  ubic.focus();
+  aviso('Confirmado: ' + j.cantidad + ' x ' + (tarea.descripcion || tarea.sku), 'ok');
+  setTimeout(cargarTarea, 400);
 });
 
-function agregarHist(c, j) {
-  const tr = document.createElement('tr');
-  tr.innerHTML = '<td>' + new Date().toLocaleTimeString() + '</td>' +
-                 '<td>' + c.ubicacion + '</td>' +
-                 '<td>' + j.sku + '</td>' +
-                 '<td>' + c.cantidad + '</td>';
-  $('hist').prepend(tr);
-}
+btnSaltar.addEventListener('click', async () => {
+  await fetch('/api/saltar', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: tarea.id, usuario: 'RESIDENTE-STG'}),
+  });
+  cargarTarea();
+});
+
+cargarTarea();
 </script>
 </body>
 </html>
 """
 
 
+def parsear_ubicacion(escaneo: str) -> str:
+    """Extrae el codigo de ubicacion de lo que devuelve el QR del rack.
+
+    El usuario confirmo que el QR trae SOLO la ubicacion, pero se toleran
+    variantes por si el formato cambia:
+      "60-001"                          -> "60-001"
+      "LOC:60-001" / "UBIC:60-001"      -> "60-001"
+      "https://host/ub?loc=60-001"      -> "60-001"
+      " 60-001 "                        -> "60-001"
+    Si no se reconoce nada, devuelve el texto tal cual (mejor intentar que fallar).
+    """
+    if not escaneo:
+        return ""
+    texto = str(escaneo).strip()
+
+    if "://" in texto or "?" in texto:
+        consulta = parse_qs(urlparse(texto).query)
+        for clave in ("loc", "ubicacion", "location", "ubic"):
+            if consulta.get(clave):
+                return consulta[clave][0].strip()
+
+    if ":" in texto and "://" not in texto:
+        prefijo, _, resto = texto.partition(":")
+        if prefijo.strip().upper() in ("LOC", "UBIC", "UBICACION", "LOCATION", "STOLOC"):
+            return resto.strip()
+
+    if "|" in texto:
+        return texto.split("|")[0].strip()
+
+    return texto
+
+
 def _conectar(db: str) -> sqlite3.Connection:
     con = sqlite3.connect(db)
+    con.row_factory = sqlite3.Row
     con.execute("""
         CREATE TABLE IF NOT EXISTS picking (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -188,77 +231,15 @@ def _conectar(db: str) -> sqlite3.Connection:
     return con
 
 
-def _a_fecha(texto: str):
-    """Convierte 'dd/mm/aaaa HH:MM:SS' a datetime para ordenar FEFO de verdad."""
-    if not texto:
-        return datetime.max
-    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(texto.strip(), fmt)
-        except ValueError:
-            continue
-    return datetime.max
-
-
-def parsear_ubicacion(escaneo: str) -> str:
-    """Extrae el codigo de ubicacion de lo que devuelve el QR del rack.
-
-    El QR puede traer la ubicacion en varios formatos; se acepta cualquiera:
-      "60-001"                          -> "60-001"
-      "LOC:60-001" / "UBIC:60-001"      -> "60-001"
-      "60-001|AREA PICKING"             -> "60-001"
-      "https://host/ub?loc=60-001"      -> "60-001"
-      " 60-001 "                        -> "60-001"
-    Si no se reconoce nada, devuelve el texto tal cual (mejor intentar que fallar).
-    """
-    if not escaneo:
-        return ""
-    texto = str(escaneo).strip()
-
-    # URL con parametro ?loc= / ?ubicacion=
-    if "://" in texto or "?" in texto:
-        from urllib.parse import parse_qs, urlparse
-        consulta = parse_qs(urlparse(texto).query)
-        for clave in ("loc", "ubicacion", "location", "ubic"):
-            if consulta.get(clave):
-                return consulta[clave][0].strip()
-
-    # "PREFIJO:valor" (LOC:, UBIC:, UBICACION:, LOCATION:)
-    if ":" in texto and "://" not in texto:
-        prefijo, _, resto = texto.partition(":")
-        if prefijo.strip().upper() in ("LOC", "UBIC", "UBICACION", "LOCATION", "STOLOC"):
-            return resto.strip()
-
-    # "valor|campo2|campo3" -> el primero
-    if "|" in texto:
-        return texto.split("|")[0].strip()
-
-    return texto
-
-
-def _buscar_sku(con: sqlite3.Connection, ubicacion: str, codigo: str) -> dict | None:
-    """Busca por SKU o por LPN dentro de la ubicacion, eligiendo lo que VENCE ANTES.
-
-    El SKU puede venir con ceros a la izquierda ("000622") y escanearse sin ellos
-    ("622"), asi que se compara con ltrim.
-    """
-    cur = con.execute(
-        """SELECT sku, lpn, descripcion, cantidad, fecha_caducidad
-             FROM stock
-            WHERE ubicacion = ?
-              AND (ltrim(sku, '0') = ltrim(?, '0') OR ltrim(lpn, '0') = ltrim(?, '0'))""",
-        (ubicacion, codigo, codigo),
-    )
-    filas = cur.fetchall()
-    if not filas:
+def _primera_tarea(con: sqlite3.Connection) -> dict | None:
+    fila = con.execute(
+        "SELECT * FROM tareas WHERE estado = 'pendiente' ORDER BY id LIMIT 1"
+    ).fetchone()
+    if fila is None:
         return None
-    # FEFO: la fecha viene como texto dd/mm/aaaa, hay que parsearla para ordenar
-    # bien (como texto, "01/03/2027" quedaria antes que "01/12/2026", que es falso).
-    elegida = min(filas, key=lambda f: _a_fecha(f[4]))
-    return {
-        "sku": elegida[0], "lpn": elegida[1], "descripcion": elegida[2],
-        "disponible": elegida[3], "caducidad": elegida[4] or "",
-    }
+    total = con.execute("SELECT COUNT(*) FROM tareas").fetchone()[0]
+    hechas = con.execute("SELECT COUNT(*) FROM tareas WHERE estado = 'ok'").fetchone()[0]
+    return {**dict(fila), "total": total, "hechas": hechas}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -268,7 +249,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _json(self, datos: dict, code: int = 200):
-        cuerpo = json.dumps(datos).encode("utf-8")
+        cuerpo = json.dumps(datos, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(cuerpo)))
@@ -283,6 +264,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(cuerpo)
 
+    def _cuerpo(self) -> dict:
+        largo = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(largo) or b"{}")
+
+    # ------------------------------------------------------------------
     def do_GET(self):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
@@ -291,89 +277,95 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA)
             return
 
-        if u.path == "/api/ubicacion":
-            crudo = qs.get("codigo", [""])[0]
-            codigo = parsear_ubicacion(crudo)
+        if u.path == "/api/tarea":
             with _conectar(self.db) as con:
-                n = con.execute(
-                    "SELECT COUNT(DISTINCT sku) FROM stock WHERE ubicacion = ?",
-                    (codigo,),
-                ).fetchone()[0]
-            self._json({"ok": n > 0, "skus": n, "ubicacion": codigo})
-            return
-
-        if u.path == "/api/sku":
-            ubicacion = qs.get("ubicacion", [""])[0].strip()
-            codigo = qs.get("codigo", [""])[0].strip()
-            with _conectar(self.db) as con:
-                dato = _buscar_sku(con, ubicacion, codigo)
-            if not dato:
+                t = _primera_tarea(con)
+            if t is None:
                 self._json({"ok": False})
                 return
-            self._json({"ok": True, **dato})
+            self._json({"ok": True, "tarea": {
+                "id": t["id"], "ubicacion": t["ubicacion"], "sku": t["sku"],
+                "descripcion": t["descripcion"], "cantidad": t["cantidad"],
+                "lote": t["lote"], "caducidad": t["caducidad"],
+            }, "total": t["total"], "hechas": t["hechas"]})
+            return
+
+        if u.path == "/api/verificar":
+            esperada = qs.get("ubicacion", [""])[0].strip()
+            leida = parsear_ubicacion(qs.get("codigo", [""])[0])
+            self._json({"ok": leida == esperada, "leida": leida,
+                        "esperada": esperada})
             return
 
         self._json({"ok": False, "error": "ruta desconocida"}, 404)
 
+    # ------------------------------------------------------------------
     def do_POST(self):
         u = urlparse(self.path)
-        if u.path != "/api/confirmar":
-            self._json({"ok": False, "error": "ruta desconocida"}, 404)
-            return
 
-        largo = int(self.headers.get("Content-Length") or 0)
-        cuerpo = json.loads(self.rfile.read(largo) or b"{}")
-
-        ubicacion = str(cuerpo.get("ubicacion", "")).strip()
-        codigo = str(cuerpo.get("codigo", "")).strip()
-        cantidad = int(cuerpo.get("cantidad", 0))
-        usuario = str(cuerpo.get("usuario", "")).strip()
-
-        if not ubicacion or not codigo or cantidad <= 0:
-            self._json({"ok": False, "error": "datos incompletos"}, 400)
-            return
-
-        with _conectar(self.db) as con:
-            dato = _buscar_sku(con, ubicacion, codigo)
-            if not dato:
-                self._json({"ok": False, "error": "SKU/LPN no encontrado"}, 400)
+        if u.path == "/api/confirmar":
+            datos = self._cuerpo()
+            try:
+                id_tarea = int(datos.get("id", 0))
+            except (TypeError, ValueError):
+                self._json({"ok": False, "error": "id invalido"}, 400)
                 return
-            if cantidad > dato["disponible"]:
-                self._json(
-                    {"ok": False,
-                     "error": f"pide {cantidad} pero solo hay {dato['disponible']}"},
-                    400,
+            usuario = str(datos.get("usuario", "")).strip()
+
+            with _conectar(self.db) as con:
+                t = con.execute("SELECT * FROM tareas WHERE id = ?", (id_tarea,)).fetchone()
+                if t is None:
+                    self._json({"ok": False, "error": "tarea inexistente"}, 404)
+                    return
+                if t["estado"] != "pendiente":
+                    self._json({"ok": False, "error": "la tarea ya no esta pendiente"}, 400)
+                    return
+                con.execute(
+                    """INSERT INTO picking
+                       (fecha, usuario, ubicacion, sku, lpn, cantidad, descripcion,
+                        lote, caducidad)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (datetime.now().isoformat(timespec="seconds"), usuario,
+                     t["ubicacion"], t["sku"], t["lote"], t["cantidad"],
+                     t["descripcion"], t["lote"], t["caducidad"]),
                 )
-                return
-            con.execute(
-                """INSERT INTO picking
-                   (fecha, usuario, ubicacion, sku, lpn, cantidad, descripcion,
-                    lote, caducidad)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
-                (datetime.now().isoformat(timespec="seconds"), usuario, ubicacion,
-                 dato["sku"], dato["lpn"], cantidad, dato["descripcion"],
-                 dato["lpn"], dato["caducidad"]),
-            )
-            con.commit()
+                con.execute(
+                    """UPDATE tareas SET estado = 'ok', fecha_ok = ?, usuario = ?,
+                       cantidad_ok = cantidad WHERE id = ?""",
+                    (datetime.now().isoformat(timespec="seconds"), usuario, id_tarea),
+                )
+                con.commit()
+            self._json({"ok": True, "cantidad": t["cantidad"], "sku": t["sku"]})
+            return
 
-        self._json({"ok": True, "sku": dato["sku"], "lpn": dato["lpn"]})
+        if u.path == "/api/saltar":
+            datos = self._cuerpo()
+            id_tarea = int(datos.get("id", 0))
+            usuario = str(datos.get("usuario", "")).strip()
+            with _conectar(self.db) as con:
+                con.execute(
+                    "UPDATE tareas SET estado = 'saltada', usuario = ? WHERE id = ?",
+                    (usuario, id_tarea),
+                )
+                con.commit()
+            self._json({"ok": True})
+            return
+
+        self._json({"ok": False, "error": "ruta desconocida"}, 404)
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Servidor local de picking (contingencia)")
+    ap = argparse.ArgumentParser(description="Picking guiado de contingencia")
     ap.add_argument("--puerto", type=int, default=8080)
     ap.add_argument("--db", default=DB_DEFECTO)
     args = ap.parse_args()
 
     if not Path(args.db).exists():
-        raise SystemExit(
-            f"No existe {args.db}. Carga primero el stock: "
-            f"python -m src.plan_b_main --db {args.db} cargar --archivo <tsv>"
-        )
+        raise SystemExit(f"No existe {args.db}. Carga primero el stock.")
 
     Handler.db = args.db
     servidor = ThreadingHTTPServer(("0.0.0.0", args.puerto), Handler)
-    print(f"Picking en http://0.0.0.0:{args.puerto}/  (base: {args.db})")
+    print(f"Picking guiado en http://0.0.0.0:{args.puerto}/  (base: {args.db})")
     print("Abrir esa URL desde el Zebra (mismo WiFi). Ctrl+C para salir.")
     servidor.serve_forever()
     return 0

@@ -221,6 +221,51 @@ def cmd_contraste(args) -> int:
     return 0
 
 
+def cmd_picking(args) -> int:
+    from . import externos, picking
+
+    inventario = _cargar_db(args.db)
+    ruta = Path(args.db)
+    try:
+        venta = externos.Venta.cargar(ruta)
+    except Exception:
+        venta = None
+    if venta is None or venta.dataframe.empty:
+        raise SystemExit(
+            "No hay venta cargada. Corre: "
+            "python -m src.plan_b_main venta --archivo <csv de TRUCK>"
+        )
+
+    demanda = venta.demanda_por_sku()
+    tareas, faltantes = picking.generar_tareas(
+        inventario, demanda, incluir_almacenamiento=args.con_almacenamiento
+    )
+    if not tareas:
+        print("[!] No se generaron tareas. Revisa el stock y la venta.")
+        return 1
+
+    picking.guardar_tareas(tareas, ruta)
+    total_cajas = sum(t.cantidad for t in tareas)
+    ubicaciones = len({t.ubicacion for t in tareas})
+    print(f"Tareas de picking: {len(tareas)}")
+    print(f"  Ubicaciones a visitar: {ubicaciones}")
+    print(f"  Cajas a pickear      : {total_cajas}")
+    print(f"  (incluye almacenamiento: {args.con_almacenamiento})")
+
+    if not faltantes.empty:
+        print(f"\n⚠️ {len(faltantes)} SKUs no se alcanzan a cubrir "
+              f"({int(faltantes['faltante'].sum())} cajas). Insumo para reaprovisionamiento:")
+        print(faltantes.head(15).to_string(index=False))
+
+    print("\nPrimeras tareas (en orden):")
+    for t in tareas[:10]:
+        print(f"  {t.ubicacion:10} {t.cantidad:>5} x {t.descripcion[:32]:34} "
+              f"lote {t.lote[:14]:16} vence {t.caducidad}")
+
+    print(f"\nServidor de picking: python -m src.picking_servidor --db {ruta}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Plan B — contingencia offline de Blue Yonder")
     ap.add_argument("--db", default=DB, help=f"Base SQLite (default {DB})")
@@ -269,6 +314,11 @@ def main() -> int:
     p = sub.add_parser("contraste", help="Cruza venta vs stock vs transito (quiebres)")
     p.add_argument("--exportar", default=None, help="Ruta CSV donde exportar el detalle")
     p.set_defaults(func=cmd_contraste)
+
+    p = sub.add_parser("picking", help="Genera las tareas de picking guiado (FEFO)")
+    p.add_argument("--con-almacenamiento", action="store_true",
+                   help="Permitir tambien picking desde AREA ALMACENAMIENTO")
+    p.set_defaults(func=cmd_picking)
 
     args = ap.parse_args()
     return args.func(args)

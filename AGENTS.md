@@ -414,12 +414,16 @@ Mitigaciones implementadas:
 ### Terminales RF (Zebra Android) — picking de contingencia
 - `docs/PLAN_B_dispositivos_RF.md` — análisis de arquitectura (opciones web vs
   Velocity/telnet, riesgos, plan).
-- `src/picking_servidor.py` — prototipo de servidor web de picking:
+- `src/picking.py` — genera las **tareas de picking guiado** desde la venta:
+  `generar_tareas(stock, demanda)` → ordena **FEFO** (picking primero, luego el
+  lote que vence antes), devuelve `(tareas, faltantes)`. `guardar_tareas()`,
+  `tarea_pendiente()`. Tabla `tareas`.
+- `src/picking_servidor.py` — servidor web del picking guiado:
   `python -m src.picking_servidor --puerto 8080 --db data/plan_b.sqlite`
-  Flujo: escanear QR de ubicación → escanear SKU/LPN → cantidad → confirmar.
-  FEFO visible. Guarda cada movimiento en la tabla `picking` (para reingreso a BY).
-  `parsear_ubicacion()` acepta el QR en varios formatos ("60-001", "LOC:60-001",
-  URL con ?loc=, "valor|campo").
+  El sistema **dirige** ("ve a X, saca N cajas"); el picker **escanea el QR del
+  rack** y el sistema **verifica**. NO se escanea SKU al pickear (la ubicación de
+  picking es única por SKU). Guarda cada pick en la tabla `picking`.
+  `parsear_ubicacion()` acepta el QR en varios formatos.
 
 ### Inspección / exploración de pantallas
 - `tools/inspeccionar_ui.py` — lista los `auto_id` de la ventana (calibración UI)
@@ -442,13 +446,14 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **63 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **66 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (15).
+  `test_picking_servidor.py` (18).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).
-- Probado el **servidor de picking** con los 3 formatos de QR de ubicación ✅.
+- Probado el **picking guiado** end-to-end (venta real → tareas FEFO → servidor) ✅:
+  35 tareas, 34 ubicaciones, FEFO respetado, verificación de QR acepta/rechaza bien.
 - Cómo probar sin la app (aquí / Linux):
 ```bash
 python -m src.main --desde-archivo data/muestra.tsv --sin-correo   # dashboard
