@@ -412,12 +412,19 @@ Mitigaciones implementadas:
 ## 10. Herramientas del repo (rama `tools-inspeccion-detalle`)
 
 ### Terminales RF (Zebra Android) — picking de contingencia
+- `src/stock_vivo.py` — **stock vivo**: la foto de la cuadratura + reservas +
+  pickeado. `disponible = cantidad - reservado - pickeado`. `reservar()` es
+  atomico (la condicion va en el UPDATE): dos Zebra no pueden ganar la ultima
+  caja. `liberar()`, `rebajar()`, `filas_disponibles()` (orden FEFO en SQL),
+  `resumen()`, `estado()`. SQLite en modo WAL. La tabla `stock` (la foto) NO se
+  toca: queda como respaldo de lo que decia Blue Yonder.
 - `docs/PLAN_B_dispositivos_RF.md` — análisis de arquitectura (opciones web vs
   Velocity/telnet, riesgos, plan).
-- `src/picking.py` — genera las **tareas de picking guiado** desde la venta:
-  `generar_tareas(stock, demanda)` → ordena **FEFO** (picking primero, luego el
-  lote que vence antes), devuelve `(tareas, faltantes)`. `guardar_tareas()`,
-  `tarea_pendiente()`. Tabla `tareas`.
+- `src/picking.py` — **destina** las tareas de picking desde la venta:
+  `destinar(db, demanda)` elige ubicacion/lote por **FEFO** y **RESERVA** el
+  stock; devuelve `(creadas, reservadas, faltantes)`. `confirmar()` rebaja y
+  libera; si el pick es parcial, re-encola lo que falta; `saltar()` libera la
+  reserva. `tarea_pendiente()`, `obtener_tarea()`, `resumen_tareas()`.
 - `src/picking_servidor.py` — servidor web del picking guiado:
   `python -m src.picking_servidor --puerto 8080 --db data/plan_b.sqlite`
   El sistema **dirige** ("ve a C01-01-01-01, saca N cajas"); el picker **escanea
@@ -448,9 +455,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **70 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **80 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (22).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

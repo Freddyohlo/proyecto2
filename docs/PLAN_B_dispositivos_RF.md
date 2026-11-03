@@ -65,7 +65,7 @@ Los Zebra quedan encendidos, conectados y con navegador — **sin servidor**.
 
 ### Opción A — App WEB en Chrome / Enterprise Browser  ⭐ RECOMENDADA
 
-El PC de contingencia levanta un servidor web en la LAN. El picker abre el
+El PC dedicado (con IP fija) levanta un servidor web en la LAN. El picker abre el
 navegador del Zebra (que ya tiene WiFi) → el sistema le dice a qué ubicación ir →
 escanea el QR del rack (verificación) → confirma.
 
@@ -128,22 +128,72 @@ sincronizar entre sí *y* con BY. Eso es peor que la caída original.
 
 ---
 
-## 4. Riesgos y mitigaciones
+## 4. Stock vivo: reservas para no hacer doble picking
+
+### El problema central
+La cuadratura captura una **foto** del stock. Pero durante la contingencia esa foto
+**se mueve**: si el sistema destina tareas sin descontar, puede destinar **la misma
+caja dos veces** → doble picking.
+
+### La solución: reservar al destinar
+```
+   disponible = cantidad (foto) - reservado - pickeado
+```
+
+| Momento | Qué pasa |
+|---|---|
+| **DESTINAR** | El sistema elige ubicación/lote (FEFO) y **RESERVA** la cantidad. Desde ahí esa mercadería está "tomada": no se vuelve a ofrecer. |
+| **CONFIRMAR** | El picker escanea y digita lo que sacó. Se **REBAJA**: suelta la reserva y suma lo pickeado. |
+| **PARCIAL** | Si saca menos, lo que falta **se libera y se re-encola** como tarea nueva. |
+| **SALTAR** | Se **libera** la reserva: vuelve a estar disponible. |
+
+**La foto original (`stock`) nunca se toca.** Queda como respaldo de lo que Blue
+Yonder decía. Todo el movimiento vive en `stock_vivo`, y queda auditado en `tareas`
+y `picking`, que es lo que después se reingresa a Blue Yonder.
+
+### ¿SQLite o un servidor SQL?
+Se usa **SQLite en modo WAL** en el PC dedicado. Para este volumen (unos pocos
+Zebra, escrituras cortas y espaciadas) alcanza y sobra:
+
+- Sin instalación, sin administración, un solo archivo (fácil de respaldar).
+- **WAL** permite lecturas mientras se escribe (varios Zebra a la vez).
+- La reserva es **atómica**: la condición de disponibilidad va dentro del propio
+  `UPDATE`, así que dos Zebra pidiendo la última caja **no pueden ganar los dos**.
+  Probado con 3 hilos simultáneos: exactamente 1 ganador.
+
+**Si algún día crece** (muchos más dispositivos, o varios PCs), el modelo se migra
+a **PostgreSQL** sin cambiar la lógica: los mismos campos, las mismas operaciones
+(`reservar` / `rebajar` / `liberar`). No hay que rediseñar nada.
+
+### Concurrencia: probado
+```
+3 Zebra pidiendo la ULTIMA caja a la vez
+  → resultados: zebra2=True, zebra1=False, zebra3=False
+  → GANADORES: 1  ✅
+  → invariante (reservado + pickeado <= cantidad): True
+```
+
+---
+
+## 4b. Riesgos y mitigaciones
 
 ### 4.1 Doble descuento al volver BY  ⚠️ EL MÁS GRAVE
-Si se pickea offline y BY sigue creyendo que el stock está, al volver el sistema
-alguien podría volver a pickear lo mismo → **stock fantasma**.
+Nuestro sistema descuenta en su propia base, pero **Blue Yonder no lo sabe** hasta
+que se reingresan los movimientos. Si al volver BY alguien vuelve a pickear lo
+mismo → **doble picking / stock fantasma**.
 
-**Mitigación:**
-- Registrar **cada** movimiento con SKU, ubicación, LPN/lote, cantidad, usuario y
-  fecha-hora. Sin eso no se puede reingresar.
+**Mitigación (implementada):**
+- El sistema **reserva** al destinar y **rebaja** al confirmar: dentro del Plan B no
+  se puede pickear dos veces la misma caja (probado con concurrencia).
+- Cada movimiento queda auditado con SKU, ubicación, LPN/lote, cantidad, usuario y
+  fecha-hora (`tabla picking`). Sin eso no se puede reingresar.
 - Al volver BY: **congelar** los SKU/ubicaciones tocados, reingresar los
   movimientos y recién entonces liberar.
 - Cuadrar contra conteo físico de las ubicaciones afectadas antes de liberar.
 
 ### 4.2 Integridad FEFO
-Offline podríamos elegir un lote que BY no habría elegido (retenciones, reservas,
-bloqueos que no vemos).
+Nuestro sistema podría elegir un lote que BY no habría elegido (retenciones,
+reservas, bloqueos que no vemos).
 
 **Mitigación:** capturar siempre LPN/lote en el pick y reingresar el lote exacto.
 

@@ -1,4 +1,4 @@
-"""Lista de picking GUIADA por ubicacion (Plan B, contingencia).
+"""Picking guiado con RESERVA de stock (Plan B, contingencia).
 
 Modelo de trabajo (confirmado por el usuario, 2026-11-03):
 
@@ -8,16 +8,23 @@ Modelo de trabajo (confirmado por el usuario, 2026-11-03):
   ubicacion de picking es unica por SKU, asi que la ubicacion ya identifica el
   producto.
 
-  Los codigos de barra de producto y LPN se escanean SOLO EN RECEPCION (ahi esta
-  la tarja con cantidad y LPN), no en picking.
+  La cantidad la digita el picker. Los codigos de barra de producto y LPN se
+  escanean SOLO EN RECEPCION (ahi esta la tarja).
 
-Por eso las tareas se generan por ubicacion, no por SKU escaneado.
+DOS MOMENTOS DISTINTOS (clave para no hacer doble picking):
 
-Orden de asignacion (FEFO):
-  1. Ubicaciones de AREA PICKING primero.
-  2. Dentro de cada una, el lote que VENCE ANTES.
-  3. Si no alcanza, se puede seguir con AREA ALMACENAMIENTO (opcional).
-  4. Lo que no se cubre queda como FALTANTE (insumo para reaprovisionamiento).
+  1. DESTINAR (aqui): se elige la ubicacion/lote y se RESERVA la cantidad.
+     Desde ese momento esa mercaderia queda "tomada" y el sistema ya no la
+     vuelve a ofrecer a otro picker.
+
+  2. CONFIRMAR (en picking_servidor): el picker escanea y digita lo que saco.
+     Se suelta la reserva y se REBAJA el stock.
+
+  disponible = cantidad (foto de la cuadratura) - reservado - pickeado
+
+  Las tareas se guardan en la tabla `tareas` (fuente de verdad, sobrevive
+  reinicios). El movimiento queda auditado en `picking` para reingresar a Blue
+  Yonder cuando vuelva.
 """
 
 from __future__ import annotations
@@ -29,24 +36,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import externos
-from . import inventario as inv
+from . import stock_vivo as sv
 
-
-def a_fecha(texto: object):
-    """Convierte 'dd/mm/aaaa HH:MM:SS' a datetime, para ordenar FEFO de verdad.
-
-    Ordenar estas fechas como texto es un error: "01/03/2027" quedaria antes que
-    "01/12/2026", o sea elegiria el lote que vence MAS TARDE.
-    """
-    if not texto:
-        return datetime.max
-    for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(str(texto).strip(), fmt)
-        except ValueError:
-            continue
-    return datetime.max
+TABLA_TAREAS = "tareas"
 
 
 @dataclass
@@ -58,123 +50,247 @@ class Tarea:
     lote: str
     caducidad: str
     area: str
+    fila_stock: int = 0          # id de la fila en stock_vivo (para reservar/rebajar)
+    reservado: int = 0
 
 
-def generar_tareas(
-    stock: inv.Inventario,
+# ---------------------------------------------------------------------------
+# Tablas
+# ---------------------------------------------------------------------------
+
+def preparar_tablas(con: sqlite3.Connection) -> None:
+    """Crea `tareas` y `picking` si no existen. `tareas` es la fuente de verdad."""
+    con.execute(f"""
+        CREATE TABLE IF NOT EXISTS {TABLA_TAREAS} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ubicacion TEXT NOT NULL,
+            sku TEXT NOT NULL,
+            sku_clave TEXT,
+            descripcion TEXT,
+            cantidad INTEGER NOT NULL,
+            lote TEXT,
+            caducidad TEXT,
+            area TEXT,
+            fila_stock INTEGER,
+            reservado INTEGER NOT NULL DEFAULT 0,
+            estado TEXT NOT NULL DEFAULT 'pendiente',
+            fecha_ok TEXT,
+            usuario TEXT,
+            cantidad_ok INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS picking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT, usuario TEXT, ubicacion TEXT, sku TEXT, lpn TEXT,
+            cantidad INTEGER, descripcion TEXT, lote TEXT, caducidad TEXT
+        )
+    """)
+
+
+# ---------------------------------------------------------------------------
+# Destinar
+# ---------------------------------------------------------------------------
+
+def destinar(
+    db: str | Path,
     demanda: pd.DataFrame,
     incluir_almacenamiento: bool = False,
-) -> tuple[list[Tarea], pd.DataFrame]:
-    """Convierte la demanda (venta) en tareas de picking por ubicacion.
+) -> tuple[int, int, pd.DataFrame]:
+    """Convierte la demanda en tareas, RESERVANDO el stock de cada una.
 
-    `demanda` es un DataFrame con al menos las columnas `sku_clave` y `cajas`
-    (lo que devuelve `externos.Venta.demanda_por_sku`).
+    `demanda` trae al menos `sku_clave` y `cajas`.
 
-    Devuelve (tareas, faltantes). `faltantes` trae los SKU que no se alcanzan a
-    cubrir con el stock disponible (para disparar reaprovisionamiento).
+    Devuelve (tareas_creadas, cajas_reservadas, faltantes).
     """
     vacio = pd.DataFrame(columns=["sku", "descripcion", "faltante"])
-    if stock.dataframe.empty or demanda is None or len(demanda) == 0:
-        return [], vacio
+    if demanda is None or len(demanda) == 0:
+        return 0, 0, vacio
 
-    df = stock.dataframe.copy()
-    df["sku_clave"] = df["sku"].map(externos.clave_sku)
-    df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce").fillna(0).astype("int64")
-    df["_fecha"] = df["fecha_caducidad"].map(a_fecha)
-
-    if not incluir_almacenamiento:
-        df = df[df["area"].eq(inv.AREA_PICKING)]
-
-    # El picking va antes que el almacenamiento; dentro de cada area, FEFO.
-    df["_prioridad_area"] = (~df["area"].eq(inv.AREA_PICKING)).astype(int)
-
-    desc_por_sku = df.groupby("sku_clave")["descripcion"].first().to_dict()
-
-    pedido = demanda.copy()
-    pedido["sku_clave"] = pedido["sku_clave"].map(externos.clave_sku)
-    pedido["cajas"] = pd.to_numeric(pedido["cajas"], errors="coerce").fillna(0).astype("int64")
-
-    tareas: list[Tarea] = []
+    creadas = 0
+    reservadas = 0
     faltantes: list[dict] = []
 
-    for _, fila in pedido.iterrows():
-        clave = fila["sku_clave"]
-        restante = int(fila["cajas"])
-        if restante <= 0:
-            continue
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
 
-        lotes = df[df["sku_clave"].eq(clave)].sort_values(["_prioridad_area", "_fecha"])
-        for _, lote in lotes.iterrows():
+        # Limpia las tareas pendientes anteriores para no acumular duplicados.
+        # Las reservas de esas pendientes se sueltan antes de borrarlas.
+        for t in con.execute(
+            f"SELECT fila_stock, reservado FROM {TABLA_TAREAS} WHERE estado = 'pendiente'"
+        ).fetchall():
+            if t["fila_stock"]:
+                sv.liberar(con, t["fila_stock"], int(t["reservado"] or 0))
+        con.execute(f"DELETE FROM {TABLA_TAREAS} WHERE estado = 'pendiente'")
+
+        for _, fila in demanda.iterrows():
+            clave = str(fila["sku_clave"])
+            restante = int(fila["cajas"])
             if restante <= 0:
-                break
-            disponible = int(lote["cantidad"])
-            if disponible <= 0:
                 continue
-            tomar = min(restante, disponible)
-            tareas.append(Tarea(
-                ubicacion=str(lote["ubicacion"]),
-                sku=str(lote["sku"]),
-                descripcion=str(lote["descripcion"]),
-                cantidad=tomar,
-                lote=str(lote["lpn"]),
-                caducidad=str(lote["fecha_caducidad"] or ""),
-                area=str(lote["area"]),
-            ))
-            restante -= tomar
 
-        if restante > 0:
-            faltantes.append({
-                "sku": str(fila.get("sku", clave)),
-                "descripcion": desc_por_sku.get(clave, ""),
-                "faltante": restante,
-            })
+            for lote in sv.filas_disponibles(con, clave, incluir_almacenamiento):
+                if restante <= 0:
+                    break
+                disponible = sv.disponible_de(con, lote["id"])
+                if disponible <= 0:
+                    continue
+                tomar = min(restante, disponible)
+                if not sv.reservar(con, lote["id"], tomar):
+                    continue          # otro Zebra se adelanto; se prueba la siguiente
 
-    return tareas, pd.DataFrame(faltantes) if faltantes else vacio
+                con.execute(
+                    f"""INSERT INTO {TABLA_TAREAS}
+                        (ubicacion, sku, sku_clave, descripcion, cantidad, lote,
+                         caducidad, area, fila_stock, reservado)
+                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (lote["ubicacion"], lote["sku"], clave, lote["descripcion"],
+                     tomar, lote["lpn"], lote["fecha_caducidad"], lote["area"],
+                     lote["id"], tomar),
+                )
+                creadas += 1
+                reservadas += tomar
+                restante -= tomar
 
+            if restante > 0:
+                faltantes.append({
+                    "sku": str(fila.get("sku", clave)),
+                    "descripcion": "",
+                    "faltante": restante,
+                })
 
-def guardar_tareas(tareas: list[Tarea], destino: str | Path = "data/plan_b.sqlite") -> Path:
-    """Guarda las tareas en la tabla `tareas` (reemplaza las anteriores)."""
-    destino = Path(destino)
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(destino) as con:
-        con.execute("DROP TABLE IF EXISTS tareas")
-        con.execute("""
-            CREATE TABLE tareas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ubicacion TEXT NOT NULL,
-                sku TEXT NOT NULL,
-                descripcion TEXT,
-                cantidad INTEGER NOT NULL,
-                lote TEXT,
-                caducidad TEXT,
-                area TEXT,
-                estado TEXT NOT NULL DEFAULT 'pendiente',
-                fecha_ok TEXT,
-                usuario TEXT,
-                cantidad_ok INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        con.executemany(
-            """INSERT INTO tareas (ubicacion, sku, descripcion, cantidad, lote, caducidad, area)
-               VALUES (?,?,?,?,?,?,?)""",
-            [(t.ubicacion, t.sku, t.descripcion, t.cantidad, t.lote, t.caducidad, t.area)
-             for t in tareas],
-        )
-        con.commit()
-    return destino
+    return creadas, reservadas, (pd.DataFrame(faltantes) if faltantes else vacio)
 
 
-def tarea_pendiente(db: str | Path = "data/plan_b.sqlite") -> dict | None:
-    """Devuelve la primera tarea pendiente (o None si ya no hay)."""
-    with sqlite3.connect(db) as con:
-        con.row_factory = sqlite3.Row
+# ---------------------------------------------------------------------------
+# Consultar
+# ---------------------------------------------------------------------------
+
+def tarea_pendiente(db: str | Path) -> dict | None:
+    """Toma la primera tarea pendiente. No la reserva (ya se reservo al destinar)."""
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
         fila = con.execute(
-            "SELECT * FROM tareas WHERE estado = 'pendiente' ORDER BY id LIMIT 1"
+            f"SELECT * FROM {TABLA_TAREAS} WHERE estado = 'pendiente' ORDER BY id LIMIT 1"
         ).fetchone()
         if fila is None:
             return None
-        total = con.execute("SELECT COUNT(*) FROM tareas").fetchone()[0]
+        total = con.execute(f"SELECT COUNT(*) FROM {TABLA_TAREAS}").fetchone()[0]
         hechas = con.execute(
-            "SELECT COUNT(*) FROM tareas WHERE estado = 'ok'"
+            f"SELECT COUNT(*) FROM {TABLA_TAREAS} WHERE estado IN ('ok','parcial')"
         ).fetchone()[0]
     return {**dict(fila), "total": total, "hechas": hechas}
+
+
+def obtener_tarea(db: str | Path, id_tarea: int) -> dict | None:
+    """Devuelve una tarea por id (o None)."""
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        fila = con.execute(
+            f"SELECT * FROM {TABLA_TAREAS} WHERE id = ?", (id_tarea,)
+        ).fetchone()
+    return dict(fila) if fila else None
+
+
+def resumen_tareas(db: str | Path) -> dict:
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        filas = con.execute(
+            f"SELECT estado, COUNT(*) AS n, SUM(cantidad) AS c "
+            f"FROM {TABLA_TAREAS} GROUP BY estado"
+        ).fetchall()
+    por_estado = {f["estado"]: {"tareas": int(f["n"]), "cajas": int(f["c"] or 0)}
+                  for f in filas}
+    return por_estado
+
+
+# ---------------------------------------------------------------------------
+# Confirmar / liberar
+# ---------------------------------------------------------------------------
+
+def confirmar(
+    db: str | Path,
+    id_tarea: int,
+    cantidad: int,
+    usuario: str = "",
+) -> dict:
+    """Confirma un pick: rebaja el stock y libera la reserva.
+
+    Si el picker saca menos de lo pedido, lo que falta se libera y se
+    RE-ENCOLA como tarea nueva, para que otro picker (o el mismo) lo tome.
+    """
+    momento = datetime.now().isoformat(timespec="seconds")
+
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        t = con.execute(f"SELECT * FROM {TABLA_TAREAS} WHERE id = ?", (id_tarea,)).fetchone()
+        if t is None:
+            return {"ok": False, "error": "tarea inexistente", "code": 404}
+        if t["estado"] != "pendiente":
+            return {"ok": False, "error": "la tarea ya no esta pendiente", "code": 400}
+
+        pedida = int(t["cantidad"])
+        reservado = int(t["reservado"] or 0)
+        if cantidad <= 0:
+            return {"ok": False, "error": "la cantidad debe ser mayor que 0", "code": 400}
+        if cantidad > pedida:
+            return {"ok": False,
+                    "error": f"pedido {pedida} y se digito {cantidad}", "code": 400}
+
+        # Rebaja: suelta lo reservado y suma lo que realmente salio.
+        if t["fila_stock"]:
+            sv.rebajar(con, t["fila_stock"], reservado, cantidad)
+
+        con.execute(
+            """INSERT INTO picking
+               (fecha, usuario, ubicacion, sku, lpn, cantidad, descripcion, lote, caducidad)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (momento, usuario, t["ubicacion"], t["sku"], t["lote"], cantidad,
+             t["descripcion"], t["lote"], t["caducidad"]),
+        )
+
+        estado = "ok" if cantidad == pedida else "parcial"
+        con.execute(
+            f"""UPDATE {TABLA_TAREAS}
+                   SET estado = ?, fecha_ok = ?, usuario = ?, cantidad_ok = ?
+                 WHERE id = ?""",
+            (estado, momento, usuario, cantidad, id_tarea),
+        )
+
+        # Lo que no se pickeo vuelve a la cola, con su reserva.
+        sobra = pedida - cantidad
+        if sobra > 0 and t["fila_stock"]:
+            if sv.reservar(con, t["fila_stock"], sobra):
+                con.execute(
+                    f"""INSERT INTO {TABLA_TAREAS}
+                        (ubicacion, sku, sku_clave, descripcion, cantidad, lote,
+                         caducidad, area, fila_stock, reservado)
+                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (t["ubicacion"], t["sku"], t["sku_clave"], t["descripcion"],
+                     sobra, t["lote"], t["caducidad"], t["area"],
+                     t["fila_stock"], sobra),
+                )
+            else:
+                # Ya no queda stock suficiente en esa fila: se avisa, no se inventa.
+                estado = "parcial"
+
+    return {"ok": True, "cantidad": cantidad, "sku": t["sku"],
+            "estado": estado, "pedida": pedida}
+
+
+def saltar(db: str | Path, id_tarea: int, usuario: str = "") -> dict:
+    """Salta una tarea y LIBERA su reserva (vuelve a estar disponible)."""
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        t = con.execute(f"SELECT * FROM {TABLA_TAREAS} WHERE id = ?", (id_tarea,)).fetchone()
+        if t is None:
+            return {"ok": False, "error": "tarea inexistente", "code": 404}
+        if t["estado"] != "pendiente":
+            return {"ok": False, "error": "la tarea ya no esta pendiente", "code": 400}
+        if t["fila_stock"]:
+            sv.liberar(con, t["fila_stock"], int(t["reservado"] or 0))
+        con.execute(
+            f"UPDATE {TABLA_TAREAS} SET estado = 'saltada', usuario = ? WHERE id = ?",
+            (usuario, id_tarea),
+        )
+    return {"ok": True}

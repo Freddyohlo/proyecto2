@@ -29,6 +29,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from . import picking as pk
+
 DB_DEFECTO = "data/plan_b.sqlite"
 
 PAGINA = """<!doctype html>
@@ -251,28 +253,13 @@ def parsear_ubicacion(escaneo: str) -> str:
 
 
 def _conectar(db: str) -> sqlite3.Connection:
-    con = sqlite3.connect(db)
+    con = sqlite3.connect(db, timeout=15)
     con.row_factory = sqlite3.Row
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS picking (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TEXT, usuario TEXT, ubicacion TEXT, sku TEXT, lpn TEXT,
-            cantidad INTEGER, descripcion TEXT, lote TEXT, caducidad TEXT
-        )
-    """)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA busy_timeout=5000")
+    pk.preparar_tablas(con)
     con.commit()
     return con
-
-
-def _primera_tarea(con: sqlite3.Connection) -> dict | None:
-    fila = con.execute(
-        "SELECT * FROM tareas WHERE estado = 'pendiente' ORDER BY id LIMIT 1"
-    ).fetchone()
-    if fila is None:
-        return None
-    total = con.execute("SELECT COUNT(*) FROM tareas").fetchone()[0]
-    hechas = con.execute("SELECT COUNT(*) FROM tareas WHERE estado = 'ok'").fetchone()[0]
-    return {**dict(fila), "total": total, "hechas": hechas}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -311,8 +298,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/tarea":
-            with _conectar(self.db) as con:
-                t = _primera_tarea(con)
+            t = pk.tarea_pendiente(self.db)
             if t is None:
                 self._json({"ok": False})
                 return
@@ -345,74 +331,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             usuario = str(datos.get("usuario", "")).strip()
 
-            with _conectar(self.db) as con:
-                t = con.execute("SELECT * FROM tareas WHERE id = ?", (id_tarea,)).fetchone()
-                if t is None:
-                    self._json({"ok": False, "error": "tarea inexistente"}, 404)
-                    return
-                if t["estado"] != "pendiente":
-                    self._json({"ok": False, "error": "la tarea ya no esta pendiente"}, 400)
-                    return
+            # La cantidad la digita el picker; si no la manda, se asume la pedida.
+            tarea = pk.obtener_tarea(self.db, id_tarea)
+            pedida = int(tarea["cantidad"]) if tarea else 0
+            try:
+                digitada = int(datos.get("cantidad", pedida))
+            except (TypeError, ValueError):
+                self._json({"ok": False, "error": "cantidad invalida"}, 400)
+                return
 
-                # La cantidad la digita el picker; si no la manda, se asume la pedida.
-                pedida = int(t["cantidad"])
-                try:
-                    digitada = int(datos.get("cantidad", pedida))
-                except (TypeError, ValueError):
-                    self._json({"ok": False, "error": "cantidad invalida"}, 400)
-                    return
-                if digitada <= 0:
-                    self._json({"ok": False, "error": "la cantidad debe ser mayor que 0"}, 400)
-                    return
-                if digitada > pedida:
-                    self._json(
-                        {"ok": False,
-                         "error": f"pedido {pedida} y se digito {digitada}"},
-                        400,
-                    )
-                    return
-
-                con.execute(
-                    """INSERT INTO picking
-                       (fecha, usuario, ubicacion, sku, lpn, cantidad, descripcion,
-                        lote, caducidad)
-                       VALUES (?,?,?,?,?,?,?,?,?)""",
-                    (datetime.now().isoformat(timespec="seconds"), usuario,
-                     t["ubicacion"], t["sku"], t["lote"], digitada,
-                     t["descripcion"], t["lote"], t["caducidad"]),
-                )
-                # Si pickeo menos de lo pedido, la tarea queda marcada como parcial.
-                estado = "ok" if digitada == pedida else "parcial"
-                con.execute(
-                    """UPDATE tareas SET estado = ?, fecha_ok = ?, usuario = ?,
-                       cantidad_ok = ? WHERE id = ?""",
-                    (estado, datetime.now().isoformat(timespec="seconds"),
-                     usuario, digitada, id_tarea),
-                )
-                # Lo que quedo sin pickear no se pierde: se re-encola como tarea nueva.
-                if digitada < pedida:
-                    con.execute(
-                        """INSERT INTO tareas
-                           (ubicacion, sku, descripcion, cantidad, lote, caducidad, area)
-                           VALUES (?,?,?,?,?,?,?)""",
-                        (t["ubicacion"], t["sku"], t["descripcion"],
-                         pedida - digitada, t["lote"], t["caducidad"], t["area"]),
-                    )
-                con.commit()
-            self._json({"ok": True, "cantidad": digitada, "sku": t["sku"],
-                        "estado": estado, "pedida": pedida})
+            r = pk.confirmar(self.db, id_tarea, digitada, usuario)
+            if not r["ok"]:
+                self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
+                return
+            self._json(r)
             return
 
         if u.path == "/api/saltar":
             datos = self._cuerpo()
             id_tarea = int(datos.get("id", 0))
             usuario = str(datos.get("usuario", "")).strip()
-            with _conectar(self.db) as con:
-                con.execute(
-                    "UPDATE tareas SET estado = 'saltada', usuario = ? WHERE id = ?",
-                    (usuario, id_tarea),
-                )
-                con.commit()
+            r = pk.saltar(self.db, id_tarea, usuario)
+            if not r["ok"]:
+                self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
+                return
             self._json({"ok": True})
             return
 

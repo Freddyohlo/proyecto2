@@ -222,9 +222,8 @@ def cmd_contraste(args) -> int:
 
 
 def cmd_picking(args) -> int:
-    from . import externos, picking
+    from . import externos, picking, stock_vivo
 
-    inventario = _cargar_db(args.db)
     ruta = Path(args.db)
     try:
         venta = externos.Venta.cargar(ruta)
@@ -236,33 +235,68 @@ def cmd_picking(args) -> int:
             "python -m src.plan_b_main venta --archivo <csv de TRUCK>"
         )
 
+    # Asegura el stock vivo (foto + reservas + pickeado)
+    filas = stock_vivo.inicializar(ruta, forzar=args.reiniciar_stock)
+    if filas == 0:
+        raise SystemExit("No hay stock. Corre primero: plan_b_main cargar --archivo <tsv>")
+
     demanda = venta.demanda_por_sku()
-    tareas, faltantes = picking.generar_tareas(
-        inventario, demanda, incluir_almacenamiento=args.con_almacenamiento
+    creadas, reservadas, faltantes = picking.destinar(
+        ruta, demanda, incluir_almacenamiento=args.con_almacenamiento
     )
-    if not tareas:
-        print("[!] No se generaron tareas. Revisa el stock y la venta.")
+    if creadas == 0:
+        print("[!] No se generaron tareas. Revisa el stock disponible.")
         return 1
 
-    picking.guardar_tareas(tareas, ruta)
-    total_cajas = sum(t.cantidad for t in tareas)
-    ubicaciones = len({t.ubicacion for t in tareas})
-    print(f"Tareas de picking: {len(tareas)}")
-    print(f"  Ubicaciones a visitar: {ubicaciones}")
-    print(f"  Cajas a pickear      : {total_cajas}")
+    print(f"Tareas destinadas: {creadas}  |  cajas RESERVADAS: {reservadas}")
     print(f"  (incluye almacenamiento: {args.con_almacenamiento})")
 
     if not faltantes.empty:
-        print(f"\n⚠️ {len(faltantes)} SKUs no se alcanzan a cubrir "
+        print(f"\n⚠️ {len(faltantes)} SKUs sin stock suficiente "
               f"({int(faltantes['faltante'].sum())} cajas). Insumo para reaprovisionamiento:")
         print(faltantes.head(15).to_string(index=False))
 
-    print("\nPrimeras tareas (en orden):")
-    for t in tareas[:10]:
-        print(f"  {t.ubicacion:10} {t.cantidad:>5} x {t.descripcion[:32]:34} "
-              f"lote {t.lote[:14]:16} vence {t.caducidad}")
+    print("\nStock vivo:")
+    r = stock_vivo.resumen(ruta)
+    print(f"  total {r['total']} | reservado {r['reservado']} | "
+          f"pickeado {r['pickeado']} | disponible {r['disponible']}")
+
+    print("\nPrimeras tareas (en orden FEFO):")
+    with stock_vivo.abrir(ruta) as con:
+        filas = con.execute(
+            """SELECT ubicacion, cantidad, descripcion, lote, caducidad
+                 FROM tareas WHERE estado = 'pendiente' ORDER BY id LIMIT 10"""
+        ).fetchall()
+    for f in filas:
+        print(f"  {f['ubicacion']:14} {f['cantidad']:>5} x {str(f['descripcion'])[:30]:32} "
+              f"lote {str(f['lote'])[:14]:16} vence {f['caducidad']}")
 
     print(f"\nServidor de picking: python -m src.picking_servidor --db {ruta}")
+    return 0
+
+
+def cmd_stock_vivo(args) -> int:
+    from . import stock_vivo
+
+    ruta = Path(args.db)
+    if args.reiniciar:
+        n = stock_vivo.inicializar(ruta, forzar=True)
+        print(f"Stock vivo reiniciado desde la foto: {n} filas.")
+    else:
+        n = stock_vivo.inicializar(ruta)
+        print(f"Stock vivo: {n} filas.")
+
+    r = stock_vivo.resumen(ruta)
+    print(f"\n  Total (foto) : {r['total']}")
+    print(f"  Reservado    : {r['reservado']}")
+    print(f"  Pickeado     : {r['pickeado']}")
+    print(f"  Disponible   : {r['disponible']}")
+
+    if args.detalle:
+        df = stock_vivo.estado(ruta)
+        con_mov = df[(df["reservado"] > 0) | (df["pickeado"] > 0)]
+        print(f"\nFilas con movimiento ({len(con_mov)}):")
+        print(con_mov.head(30).to_string(index=False))
     return 0
 
 
@@ -315,10 +349,19 @@ def main() -> int:
     p.add_argument("--exportar", default=None, help="Ruta CSV donde exportar el detalle")
     p.set_defaults(func=cmd_contraste)
 
-    p = sub.add_parser("picking", help="Genera las tareas de picking guiado (FEFO)")
+    p = sub.add_parser("picking", help="Destina tareas de picking (reserva el stock)")
     p.add_argument("--con-almacenamiento", action="store_true",
                    help="Permitir tambien picking desde AREA ALMACENAMIENTO")
+    p.add_argument("--reiniciar-stock", action="store_true",
+                   help="Reinicia el stock vivo desde la foto antes de destinar")
     p.set_defaults(func=cmd_picking)
+
+    p = sub.add_parser("stock-vivo", help="Muestra el stock vivo (reservado/pickeado)")
+    p.add_argument("--reiniciar", action="store_true",
+                   help="Reinicia el stock vivo desde la foto de la cuadratura")
+    p.add_argument("--detalle", action="store_true",
+                   help="Muestra las filas con movimiento")
+    p.set_defaults(func=cmd_stock_vivo)
 
     args = ap.parse_args()
     return args.func(args)
