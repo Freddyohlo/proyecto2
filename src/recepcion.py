@@ -460,6 +460,74 @@ def recibir_y_ubicar(db: str | Path, recepcion: Recepcion,
     return {**r, **u, "ok": True, "paso_unico": True, "ubicacion": destino}
 
 
+def crear_sku(db: str | Path, sku: str, descripcion: str = "",
+              ubicacion: str = "", cantidad: int = 0,
+              lpn: str = "", fecha_vencimiento: str = "",
+              usuario: str = "") -> dict:
+    """Da de alta un SKU que NO venia en la cuadratura (producto que va llegando).
+
+    Caso real: llega un producto nuevo, que no estaba en el stock capturado. En
+    vez de rechazarlo, se registra en la tabla `sku_nuevos` y se ingresa al stock
+    vivo. Asi el sistema queda completo y despues se cuadra con Blue Yonder.
+    """
+    from .externos import clave_sku
+
+    if not sku or not str(sku).strip():
+        return {"ok": False, "error": "falta el SKU", "code": 400}
+
+    sku = str(sku).strip()
+    momento = datetime.now().isoformat(timespec="seconds")
+    venc = normalizar_fecha(fecha_vencimiento)
+
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS sku_nuevos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT, usuario TEXT, sku TEXT, sku_clave TEXT,
+                descripcion TEXT, ubicacion TEXT, cantidad INTEGER,
+                lpn TEXT, fecha_vencimiento TEXT
+            )
+        """)
+        con.execute(
+            """INSERT INTO sku_nuevos
+               (fecha, usuario, sku, sku_clave, descripcion, ubicacion, cantidad,
+                lpn, fecha_vencimiento)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (momento, usuario, sku, clave_sku(sku), descripcion, ubicacion,
+             cantidad, lpn, venc),
+        )
+
+        # Entra al stock vivo (en RECEPCION o directo a la ubicacion indicada)
+        if cantidad > 0:
+            sv.ingresar(
+                con,
+                ubicacion=ubicacion or sv.AREA_RECEPCION,
+                sku=sku,
+                cantidad=cantidad,
+                lpn=lpn or "",
+                descripcion=descripcion,
+                area=sv.AREA_ALMACENAMIENTO if ubicacion else sv.AREA_RECEPCION,
+                fecha_caducidad=venc,
+            )
+
+    return {"ok": True, "sku": sku, "cantidad": cantidad,
+            "ubicacion": ubicacion or sv.AREA_RECEPCION, "nuevo": True}
+
+
+def skus_nuevos(db: str | Path) -> pd.DataFrame:
+    """SKU dados de alta que no venian en la cuadratura."""
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        try:
+            return pd.read_sql_query(
+                "SELECT fecha, sku, descripcion, cantidad, ubicacion, lpn, "
+                "fecha_vencimiento FROM sku_nuevos ORDER BY id", con)
+        except Exception:
+            return pd.DataFrame(columns=["fecha", "sku", "descripcion", "cantidad",
+                                         "ubicacion", "lpn", "fecha_vencimiento"])
+
+
 def pendientes(db: str | Path) -> pd.DataFrame:
     """Recepciones recibidas pero todavia sin ubicar."""
     with sv.abrir(db) as con:

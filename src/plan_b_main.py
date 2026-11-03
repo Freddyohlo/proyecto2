@@ -300,6 +300,37 @@ def cmd_stock_vivo(args) -> int:
     return 0
 
 
+def cmd_informe_dia(args) -> int:
+    from . import informe_dia
+
+    ruta = Path(args.db)
+    fecha = args.fecha or datetime.now().strftime("%Y-%m-%d")
+    d = informe_dia.recopilar(ruta, fecha)
+
+    print(f"Informe del dia {fecha}")
+    print(f"  Cajas pickeadas : {d.cajas_pickeadas}")
+    print(f"  Cajas recibidas : {d.cajas_recibidas}")
+    print(f"  Reservado       : {d.stock.get('reservado', 0)}")
+    print(f"  Disponible      : {d.stock.get('disponible', 0)}")
+    print(f"  Ubicaciones     : {len(d.ubicaciones)}")
+    print("\n  Tareas:")
+    for estado, v in d.tareas.items():
+        print(f"    {estado:10} {v['tareas']:>4} tareas  {v['cajas']:>6} cajas")
+
+    print("\n  Observaciones:")
+    for a in d.alertas():
+        print(f"    [{a['nivel']}] {a['texto']}")
+
+    salida = Path("output")
+    salida.mkdir(exist_ok=True)
+    html = informe_dia.generar_html(d, salida / f"informe_dia_{fecha}.html")
+    xlsx = informe_dia.generar_excel(d, salida / f"informe_dia_{fecha}.xlsx")
+    print(f"\nHTML : {html.resolve()}")
+    print(f"       {html.resolve().as_uri()}")
+    print(f"Excel: {xlsx.resolve()}")
+    return 0
+
+
 def cmd_recepcion(args) -> int:
     from . import recepcion as rc
 
@@ -329,6 +360,19 @@ def cmd_recepcion(args) -> int:
             return 1
         print(f"Ubicado: LPN {r['lpn']} ({r['cantidad']} cajas) -> {r['ubicacion']}")
         print(f"  vence {r['vencimiento'] or '(sin vencimiento)'}")
+        return 0
+
+    if args.sku_nuevo:
+        r = rc.crear_sku(ruta, sku=args.sku_nuevo, descripcion=args.descripcion or "",
+                         ubicacion=args.ubicacion or "", cantidad=args.cantidad,
+                         lpn=args.lpn or "",
+                         fecha_vencimiento=rc.normalizar_fecha(args.vencimiento),
+                         usuario=args.usuario or "")
+        if not r["ok"]:
+            print(f"[!] {r['error']}")
+            return 1
+        print(f"SKU nuevo dado de alta: {r['sku']} con {r['cantidad']} cajas "
+              f"en {r['ubicacion']}")
         return 0
 
     if args.sugerir:
@@ -417,7 +461,13 @@ def main() -> int:
                    help="Muestra las filas con movimiento")
     p.set_defaults(func=cmd_stock_vivo)
 
+    p = sub.add_parser("informe-dia", help="Informe del dia de contingencia")
+    p.add_argument("--fecha", default=None)
+    p.set_defaults(func=cmd_informe_dia)
+
     p = sub.add_parser("recepcion", help="Recepcion: recibir (tarja) y ubicar")
+    p.add_argument("--sku-nuevo", default="",
+                   help="Dar de alta un SKU que no venia en la cuadratura")
     p.add_argument("--recibir", action="store_true", help="Registrar mercaderia recibida")
     p.add_argument("--lpn", default="", help="LPN de la tarja")
     p.add_argument("--sku", default="", help="SKU")

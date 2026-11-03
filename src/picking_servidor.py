@@ -51,6 +51,11 @@ PAGINA_MENU = """<!doctype html>
   .picking { background: #1d4ed8; }
   .recepcion { background: #15803d; }
   .estado { background: #334155; font-size: 19px; padding: 18px 20px; }
+  .informe { background: #7c3aed; }
+  #cajaInforme { background:#334155; border-radius:16px; padding:20px; margin-bottom:14px;
+                 display:none; }
+  #cajaInforme a { display:inline-block; background:#0b1220; padding:12px 16px;
+                   font-size:16px; margin:6px 6px 0 0; border-radius:10px; }
   #resumen { font-size: 15px; color: #cbd8ea; margin-top: 10px; line-height: 1.7; }
 </style>
 </head>
@@ -67,8 +72,17 @@ PAGINA_MENU = """<!doctype html>
 <a class="estado" href="#" onclick="verEstado(); return false;">VER ESTADO
   <small>Stock, tareas y recepcion del dia</small></a>
 
+<a class="informe" href="#" onclick="generarInforme(); return false;">GENERAR INFORMES
+  <small>Cierre del dia: pickeado, recibido y faltantes</small></a>
+
 <div class="estado" id="cajaEstado" style="display:none;">
   <div id="resumen"></div>
+</div>
+
+<div id="cajaInforme">
+  <div style="font-size:19px;font-weight:800;margin-bottom:6px;">✅ Informes generados</div>
+  <div id="avisoInforme" style="font-size:15px;color:#cbd8ea;"></div>
+  <div id="enlaces"></div>
 </div>
 
 <script>
@@ -87,6 +101,17 @@ async function verEstado() {
     'Recibidas ' + rec.recepciones + ' (' + rec.cajas + ' cajas) | ' +
     'pendientes de ubicar ' + rec.pendientes + (rec.sin_vencimiento ? ' | ⚠️ ' + rec.sin_vencimiento + ' sin vencimiento' : '');
   $('cajaEstado').style.display = 'block';
+}
+async function generarInforme() {
+  const r = await fetch('/api/informe/generar', {method: 'POST'});
+  const j = await r.json();
+  if (!j.ok) { alert('Error: ' + j.error); return; }
+  $('avisoInforme').textContent = 'Dia ' + j.fecha + ' — ' +
+    j.cajas_pickeadas + ' cajas pickeadas, ' + j.cajas_recibidas + ' recibidas.';
+  $('enlaces').innerHTML =
+    '<a href="' + j.html + '" target="_blank">📄 Ver informe (HTML)</a>' +
+    '<a href="' + j.excel + '" target="_blank">📊 Excel</a>';
+  $('cajaInforme').style.display = 'block';
 }
 const $ = id => document.getElementById(id);
 </script>
@@ -175,6 +200,7 @@ PAGINA_RECEPCION = """<!doctype html>
 
   <button id="btnRecibir" disabled>RECIBIR</button>
   <button id="btnRecibirUbicar" class="gris" disabled>RECIBIR Y UBICAR (un paso)</button>
+  <button id="btnSkuNuevo" class="gris oculto">+ DAR DE ALTA ESTE SKU (producto nuevo)</button>
 </div>
 
 <div class="tarjeta">
@@ -196,6 +222,7 @@ const lpn = $('lpn'), sku = $('sku'), cant = $('cantidad'), msg = $('msg');
 const elab = $('elaboracion'), venc = $('vencimiento'), ubic = $('ubicacion');
 const cajasPallet = $('cajasPallet'), perfil = $('perfil'), desc = $('descripcion');
 const btn = $('btnRecibir'), btnRU = $('btnRecibirUbicar'), destino = $('destino');
+const btnNuevo = $('btnSkuNuevo');
 let idSeleccion = null;
 
 function aviso(t, c) { msg.className = c || ''; msg.textContent = t; }
@@ -214,6 +241,8 @@ lpn.addEventListener('change', async () => {
   const sd = (j.sku_detectado || {});
   if (sd.sku) { sku.value = sd.sku; llenos.push('SKU ' + sd.sku +
     (sd.origen === 'stock' ? ' (confirmado en stock)' : '')); }
+  // Si el SKU no esta en la cuadratura, es producto nuevo: se puede dar de alta
+  btnNuevo.classList.toggle('oculto', !(sd.sku && sd.origen === 'codigo'));
   if (g.cantidad) { cant.value = g.cantidad; llenos.push('cantidad ' + g.cantidad); }
   if (g.fecha_vencimiento) { venc.value = g.fecha_vencimiento; llenos.push('vence ' + g.fecha_vencimiento); }
   if (g.fecha_elaboracion) { elab.value = g.fecha_elaboracion; llenos.push('elab ' + g.fecha_elaboracion); }
@@ -314,6 +343,24 @@ async function cargarPendientes() {
   });
   if (!tb.children.length) tb.innerHTML = '<tr><td colspan="4">(nada pendiente)</td></tr>';
 }
+
+btnNuevo.addEventListener('click', async () => {
+  if (!sku.value.trim()) { aviso('Primero escanee la tarja.', 'err'); return; }
+  const r = await fetch('/api/recepcion/sku-nuevo', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      sku: sku.value.trim(), descripcion: desc.value.trim(),
+      ubicacion: ubic.value.trim(), cantidad: parseInt(cant.value || '0', 10),
+      lpn: lpn.value.trim(), vencimiento: venc.value.trim(), usuario: 'RECEPTOR',
+    }),
+  });
+  const j = await r.json();
+  if (!j.ok) { aviso('❌ ' + j.error, 'err'); return; }
+  aviso('✅ SKU ' + j.sku + ' dado de alta con ' + j.cantidad +
+        ' cajas en ' + j.ubicacion, 'ok');
+  btnNuevo.classList.add('oculto');
+  limpiar(); cargarPendientes();
+});
 
 $('btnUbicar').addEventListener('click', async () => {
   if (!idSeleccion) { aviso('Toque primero una fila de la lista.', 'err'); return; }
@@ -604,6 +651,26 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA)
             return
 
+        if u.path.startswith("/informes/"):
+            from urllib.parse import unquote
+            nombre = Path(unquote(u.path[len("/informes/"):])).name
+            archivo = Path("output") / nombre
+            if not archivo.exists():
+                self._json({"ok": False, "error": "no existe"}, 404)
+                return
+            datos = archivo.read_bytes()
+            tipo = ("application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.sheet" if archivo.suffix == ".xlsx" else "text/html")
+            self.send_response(200)
+            self.send_header("Content-Type", tipo + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(datos)))
+            self.send_header("Content-Disposition",
+                             f'attachment; filename="{archivo.name}"'
+                             if archivo.suffix == ".xlsx" else "inline")
+            self.end_headers()
+            self.wfile.write(datos)
+            return
+
         if u.path == "/api/estado":
             from . import recepcion as rc
             from . import stock_vivo as sv
@@ -667,6 +734,22 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def do_POST(self):
         u = urlparse(self.path)
+
+        if u.path == "/api/informe/generar":
+            from . import informe_dia
+            from datetime import datetime as _dt
+            fecha = _dt.now().strftime("%Y-%m-%d")
+            d = informe_dia.recopilar(self.db, fecha)
+            salida = Path("output")
+            salida.mkdir(exist_ok=True)
+            html = informe_dia.generar_html(d, salida / f"informe_dia_{fecha}.html")
+            xlsx = informe_dia.generar_excel(d, salida / f"informe_dia_{fecha}.xlsx")
+            self._json({"ok": True, "fecha": fecha,
+                        "cajas_pickeadas": d.cajas_pickeadas,
+                        "cajas_recibidas": d.cajas_recibidas,
+                        "html": "/informes/" + html.name,
+                        "excel": "/informes/" + xlsx.name})
+            return
 
         if u.path == "/api/confirmar":
             datos = self._cuerpo()
@@ -747,6 +830,25 @@ class Handler(BaseHTTPRequestHandler):
                                         str(datos.get("ubicacion_final", "")).strip())
             else:
                 r = rc.recibir(self.db, recep)
+            if not r["ok"]:
+                self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
+                return
+            self._json(r)
+            return
+
+        if u.path == "/api/recepcion/sku-nuevo":
+            from . import recepcion as rc
+            datos = self._cuerpo()
+            r = rc.crear_sku(
+                self.db,
+                sku=str(datos.get("sku", "")).strip(),
+                descripcion=str(datos.get("descripcion", "")).strip(),
+                ubicacion=str(datos.get("ubicacion", "")).strip(),
+                cantidad=int(datos.get("cantidad", 0) or 0),
+                lpn=str(datos.get("lpn", "")).strip(),
+                fecha_vencimiento=str(datos.get("vencimiento", "")).strip(),
+                usuario=str(datos.get("usuario", "")).strip(),
+            )
             if not r["ok"]:
                 self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
                 return

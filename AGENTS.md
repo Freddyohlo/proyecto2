@@ -481,6 +481,23 @@ Mitigaciones implementadas:
   ⚠️ El LPN de la tarja (18 digitos) NO coincide con los de la cuadratura
   (`CD8000...` de 14, o `D000...` de 11): falta confirmar a cual corresponde.
 
+### Informe del día e informes
+- `src/informe_dia.py` — **informe del día de contingencia**: consolida stock vivo,
+  tareas, recepción, SKU nuevos, pickeado por SKU y ubicaciones tocadas.
+  `recopilar(db, fecha)`, `generar_html()`, `generar_excel()`, `alertas()`.
+- `templates/informe_dia.html.j2` — HTML del informe (imprimible).
+- **Botón "GENERAR INFORMES"** en la portada (`/`): genera y ofrece los enlaces
+  al HTML y al Excel (`POST /api/informe/generar`; se sirven en `/informes/<archivo>`).
+- CLI: `python -m src.plan_b_main informe-dia [--fecha AAAA-MM-DD]`.
+
+### SKU nuevos (producto que va llegando)
+- Llega mercadería que **no venía en la cuadratura** (producto nuevo). En vez de
+  rechazarla, se da de alta: `recepcion.crear_sku()` → tabla `sku_nuevos` + entra
+  al stock vivo. `recepcion.skus_nuevos()`.
+- En la pantalla de recepción aparece el botón **"+ DAR DE ALTA ESTE SKU"** cuando
+  el SKU escaneado no está en el stock (`origen: "codigo"`).
+- CLI: `python -m src.plan_b_main recepcion --sku-nuevo 700809 --cantidad 198 ...`.
+
 ### Inspección / exploración de pantallas
 - `tools/inspeccionar_ui.py` — lista los `auto_id` de la ventana (calibración UI)
 - `tools/probar_captura.py` — login + copia de la grilla (sin correo)
@@ -502,9 +519,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **134 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **145 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (11).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).
