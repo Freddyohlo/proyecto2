@@ -17,17 +17,22 @@
 
 ### Flujo de picking real (confirmado)
 ```
-   El sistema DIRIGE:  "ve a la ubicacion X, saca N cajas"
+   El sistema DIRIGE:  "ve a la ubicacion C01-01-01-01, saca N cajas"
         │
    El picker va y ESCANEA EL QR DEL RACK  (el QR trae solo la ubicacion)
         │
    El sistema VERIFICA que sea la ubicacion correcta  ✅ / ❌
         │
-   Confirma el pick
+   Si coincide, el sistema deja DIGITAR LA CANTIDAD
+        │
+   Confirma el pick  (si saca menos, el resto se re-encola)
 ```
 **No se escanea el SKU**: como la ubicación de picking es única por SKU, escanear la
 ubicación ya identifica el producto. El escaneo sirve para **verificar que el picker
 está parado en el lugar correcto**, no para elegir el producto.
+
+**Cantidad**: la digita el picker. Si saca menos de lo pedido, la tarea queda
+`parcial` y **lo que falta se re-encola** como tarea nueva (no se pierde).
 
 ### Equipos confirmados
 - **Zebra MC3400** → Android 13 / 14.
@@ -35,6 +40,7 @@ está parado en el lugar correcto**, no para elegir el producto.
 - Ambos con **Chrome** y **Enterprise Browser**.
 - El QR del rack **se lee con el láser** del Zebra.
 - **No se involucra a TI**: es un proyecto de los operadores WMS.
+- Hay un **PC dedicado** al proyecto → se le puede poner **IP fija**. ✅
 
 ---
 

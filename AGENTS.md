@@ -420,9 +420,11 @@ Mitigaciones implementadas:
   `tarea_pendiente()`. Tabla `tareas`.
 - `src/picking_servidor.py` — servidor web del picking guiado:
   `python -m src.picking_servidor --puerto 8080 --db data/plan_b.sqlite`
-  El sistema **dirige** ("ve a X, saca N cajas"); el picker **escanea el QR del
-  rack** y el sistema **verifica**. NO se escanea SKU al pickear (la ubicación de
-  picking es única por SKU). Guarda cada pick en la tabla `picking`.
+  El sistema **dirige** ("ve a C01-01-01-01, saca N cajas"); el picker **escanea
+  el QR del rack** y el sistema **verifica**. Si coincide, el picker **digita la
+  cantidad**. NO se escanea SKU al pickear (la ubicación de picking es única por
+  SKU). Guarda cada pick en la tabla `picking`. Si saca menos de lo pedido, la
+  tarea queda `parcial` y **lo que falta se re-encola** como tarea nueva.
   `parsear_ubicacion()` acepta el QR en varios formatos.
 
 ### Inspección / exploración de pantallas
@@ -446,9 +448,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **66 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **70 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (18).
+  `test_picking_servidor.py` (22).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

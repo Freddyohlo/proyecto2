@@ -211,15 +211,60 @@ def test_verificar_acepta_qr_con_prefijo(servidor):
 def test_confirmar_marca_ok_y_guarda_movimiento(servidor):
     base, db = servidor
     t = _get(base + "/api/tarea")["tarea"]
-    j = _post(base + "/api/confirmar", {"id": t["id"], "usuario": "RESIDENTE-STG"})
+    j = _post(base + "/api/confirmar", {"id": t["id"], "usuario": "RESIDENTE-STG",
+                                       "cantidad": 12})
     assert j["ok"] is True
     assert j["cantidad"] == 12
+    assert j["estado"] == "ok"
 
     with sqlite3.connect(db) as con:
         estado = con.execute("SELECT estado FROM tareas WHERE id=?", (t["id"],)).fetchone()[0]
         mov = con.execute("SELECT ubicacion, sku, cantidad, lote FROM picking").fetchone()
     assert estado == "ok"
     assert mov == ("60-001", "000622", 12, "LPN_A")
+
+
+def test_pick_parcial_reencola_lo_que_falta(servidor):
+    """Si el picker saca menos, el resto vuelve a quedar pendiente."""
+    base, db = servidor
+    t = _get(base + "/api/tarea")["tarea"]       # pide 12
+    j = _post(base + "/api/confirmar", {"id": t["id"], "cantidad": 7})
+    assert j["ok"] is True
+    assert j["estado"] == "parcial"
+    assert j["cantidad"] == 7
+
+    with sqlite3.connect(db) as con:
+        estado = con.execute("SELECT estado FROM tareas WHERE id=?", (t["id"],)).fetchone()[0]
+        # La re-encolada es la ultima (id mas alto)
+        nueva = con.execute(
+            "SELECT cantidad, estado, ubicacion FROM tareas ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert estado == "parcial"
+    assert nueva == (5, "pendiente", "60-001")     # 12 - 7, misma ubicacion
+
+
+def test_no_deja_digitar_mas_de_lo_pedido(servidor):
+    base, _ = servidor
+    t = _get(base + "/api/tarea")["tarea"]       # pide 12
+    with pytest.raises(urllib.error.HTTPError) as e:
+        _post(base + "/api/confirmar", {"id": t["id"], "cantidad": 99})
+    assert e.value.code == 400
+
+
+def test_cantidad_cero_o_negativa_es_rechazada(servidor):
+    base, _ = servidor
+    t = _get(base + "/api/tarea")["tarea"]
+    for mala in (0, -3):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            _post(base + "/api/confirmar", {"id": t["id"], "cantidad": mala})
+        assert e.value.code == 400
+
+
+def test_sin_cantidad_asume_la_pedida(servidor):
+    base, _ = servidor
+    t = _get(base + "/api/tarea")["tarea"]
+    j = _post(base + "/api/confirmar", {"id": t["id"]})
+    assert j["ok"] is True and j["cantidad"] == 12
 
 
 def test_confirmar_dos_veces_la_misma_tarea_falla(servidor):

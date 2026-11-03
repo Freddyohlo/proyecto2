@@ -57,6 +57,10 @@ PAGINA = """<!doctype html>
           border: 2px solid #2b3d5c; background: #0b1220; color: #e6edf7; }
   input:focus { outline: none; border-color: #38bdf8; }
 
+  #pasoCant { margin-top: 12px; }
+  #pasoCant .etq { font-size: 15px; color: #93a4bf; margin-bottom: 8px; }
+  #cantidad { font-size: 40px; font-weight: 800; text-align: center; }
+
   button { width: 100%; font-size: 26px; font-weight: 800; padding: 20px;
            border: 0; border-radius: 12px; color: #fff; margin-top: 10px; }
   #btnOk { background: #16a34a; }
@@ -94,6 +98,13 @@ PAGINA = """<!doctype html>
       Escanee el QR del rack para confirmar
     </div>
     <input id="scan" autocomplete="off" placeholder="escaneando..." autofocus>
+
+    <div id="pasoCant" class="oculto">
+      <div class="etq">Cantidad pickeada</div>
+      <input id="cantidad" type="number" inputmode="numeric" min="1"
+             autocomplete="off" placeholder="0">
+    </div>
+
     <button id="btnOk" disabled>CONFIRMAR PICK</button>
     <button id="btnSaltar" class="gris">Saltar tarea</button>
   </div>
@@ -107,6 +118,7 @@ PAGINA = """<!doctype html>
 <script>
 const $ = id => document.getElementById(id);
 const scan = $('scan'), msg = $('msg'), btnOk = $('btnOk'), btnSaltar = $('btnSaltar');
+const pasoCant = $('pasoCant'), cant = $('cantidad');
 let tarea = null;
 
 function aviso(texto, clase) {
@@ -133,6 +145,7 @@ async function cargarTarea() {
                            (tarea.caducidad ? '  |  vence ' + tarea.caducidad : '');
   $('progreso').textContent = 'Tarea ' + (j.hechas + 1) + ' de ' + j.total;
   scan.value = ''; scan.disabled = false; btnOk.disabled = true;
+  pasoCant.classList.add('oculto'); cant.value = '';
   aviso('Vaya a ' + tarea.ubicacion + ' y escanee el QR del rack.');
   scan.focus();
 }
@@ -152,16 +165,36 @@ scan.addEventListener('change', () => {
         scan.select();
         return;
       }
-      aviso('✅ Ubicacion correcta. Confirme el pick.', 'ok');
-      scan.disabled = true; btnOk.disabled = false;
+      aviso('✅ Ubicacion correcta. Digite la cantidad.', 'ok');
+      scan.disabled = true;
+      pasoCant.classList.remove('oculto');
+      cant.focus();
     });
 });
 
+// Al escribir la cantidad se valida contra lo pedido
+cant.addEventListener('input', () => {
+  const n = parseInt(cant.value || '0', 10);
+  if (n <= 0) { btnOk.disabled = true; return; }
+  if (n > tarea.cantidad) {
+    aviso('⚠️ Pedido ' + tarea.cantidad + ' cajas; digitaste ' + n + '.', 'err');
+    btnOk.disabled = true;
+    return;
+  }
+  if (n < tarea.cantidad) {
+    aviso('Faltante: pide ' + tarea.cantidad + ' y digitaste ' + n + '.', '');
+  } else {
+    aviso('Cantidad completa. Confirme el pick.', 'ok');
+  }
+  btnOk.disabled = false;
+});
+
 btnOk.addEventListener('click', async () => {
+  const n = parseInt(cant.value || '0', 10);
   const r = await fetch('/api/confirmar', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({id: tarea.id, usuario: 'RESIDENTE-STG'}),
+    body: JSON.stringify({id: tarea.id, cantidad: n, usuario: 'RESIDENTE-STG'}),
   });
   const j = await r.json();
   if (!j.ok) { aviso('Error: ' + j.error, 'err'); return; }
@@ -320,22 +353,54 @@ class Handler(BaseHTTPRequestHandler):
                 if t["estado"] != "pendiente":
                     self._json({"ok": False, "error": "la tarea ya no esta pendiente"}, 400)
                     return
+
+                # La cantidad la digita el picker; si no la manda, se asume la pedida.
+                pedida = int(t["cantidad"])
+                try:
+                    digitada = int(datos.get("cantidad", pedida))
+                except (TypeError, ValueError):
+                    self._json({"ok": False, "error": "cantidad invalida"}, 400)
+                    return
+                if digitada <= 0:
+                    self._json({"ok": False, "error": "la cantidad debe ser mayor que 0"}, 400)
+                    return
+                if digitada > pedida:
+                    self._json(
+                        {"ok": False,
+                         "error": f"pedido {pedida} y se digito {digitada}"},
+                        400,
+                    )
+                    return
+
                 con.execute(
                     """INSERT INTO picking
                        (fecha, usuario, ubicacion, sku, lpn, cantidad, descripcion,
                         lote, caducidad)
                        VALUES (?,?,?,?,?,?,?,?,?)""",
                     (datetime.now().isoformat(timespec="seconds"), usuario,
-                     t["ubicacion"], t["sku"], t["lote"], t["cantidad"],
+                     t["ubicacion"], t["sku"], t["lote"], digitada,
                      t["descripcion"], t["lote"], t["caducidad"]),
                 )
+                # Si pickeo menos de lo pedido, la tarea queda marcada como parcial.
+                estado = "ok" if digitada == pedida else "parcial"
                 con.execute(
-                    """UPDATE tareas SET estado = 'ok', fecha_ok = ?, usuario = ?,
-                       cantidad_ok = cantidad WHERE id = ?""",
-                    (datetime.now().isoformat(timespec="seconds"), usuario, id_tarea),
+                    """UPDATE tareas SET estado = ?, fecha_ok = ?, usuario = ?,
+                       cantidad_ok = ? WHERE id = ?""",
+                    (estado, datetime.now().isoformat(timespec="seconds"),
+                     usuario, digitada, id_tarea),
                 )
+                # Lo que quedo sin pickear no se pierde: se re-encola como tarea nueva.
+                if digitada < pedida:
+                    con.execute(
+                        """INSERT INTO tareas
+                           (ubicacion, sku, descripcion, cantidad, lote, caducidad, area)
+                           VALUES (?,?,?,?,?,?,?)""",
+                        (t["ubicacion"], t["sku"], t["descripcion"],
+                         pedida - digitada, t["lote"], t["caducidad"], t["area"]),
+                    )
                 con.commit()
-            self._json({"ok": True, "cantidad": t["cantidad"], "sku": t["sku"]})
+            self._json({"ok": True, "cantidad": digitada, "sku": t["sku"],
+                        "estado": estado, "pedida": pedida})
             return
 
         if u.path == "/api/saltar":
