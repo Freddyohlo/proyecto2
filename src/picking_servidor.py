@@ -53,6 +53,7 @@ PAGINA_MENU = """<!doctype html>
   .estado { background: #334155; font-size: 19px; padding: 18px 20px; }
   .informe { background: #7c3aed; }
   .cerrar { background: #b45309; }
+  .reapro { background: #0891b2; }
   #cajaInforme { background:#334155; border-radius:16px; padding:20px; margin-bottom:14px;
                  display:none; }
   #cajaInforme a { display:inline-block; background:#0b1220; padding:12px 16px;
@@ -75,6 +76,9 @@ PAGINA_MENU = """<!doctype html>
 
 <a class="informe" href="#" onclick="generarInforme(); return false;">GENERAR INFORMES
   <small>Ver el informe del dia (HTML y Excel)</small></a>
+
+<a class="reapro" href="/reapro">REAPROVISIONAR
+  <small>Ver que esta bajo el minimo y bajar de almacen a picking</small></a>
 
 <a class="cerrar" href="#" onclick="cerrarDia(); return false;">CERRAR EL DIA
   <small>Libera lo no pickeado y genera el informe de cierre</small></a>
@@ -136,6 +140,208 @@ async function generarInforme() {
   $('cajaInforme').style.display = 'block';
 }
 const $ = id => document.getElementById(id);
+</script>
+</body>
+</html>
+"""
+
+PAGINA_GRUA = """<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Grua — reaprovisionamiento</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: system-ui, sans-serif; margin:0; padding:12px;
+         background:#0b1220; color:#e6edf7; font-size:20px; }
+  h1 { font-size:20px; margin:0 0 10px; color:#93a4bf; font-weight:600; }
+  .tarjeta { background:#16233a; border-radius:14px; padding:16px; margin-bottom:12px; }
+  .de { font-size:16px; color:#93a4bf; }
+  .ubic { font-size:40px; font-weight:800; line-height:1.1; margin:2px 0; }
+  .flecha { font-size:28px; color:#38bdf8; text-align:center; margin:6px 0; }
+  .prod { font-size:18px; color:#cbd8ea; }
+  .cant { font-size:34px; font-weight:800; color:#4ade80; margin-top:8px; }
+  button { width:100%; font-size:24px; font-weight:800; padding:20px; border:0;
+           border-radius:12px; color:#fff; background:#16a34a; margin-top:10px; }
+  button:disabled { background:#334155; color:#94a3b8; }
+  #msg { padding:14px; border-radius:12px; min-height:50px; font-size:17px;
+         background:#16233a; margin-bottom:12px; }
+  #msg.ok { background:#14532d; color:#bbf7d0; }
+  #msg.err { background:#7f1d1d; color:#fecaca; }
+  .oculto { display:none; }
+</style>
+</head>
+<body>
+<h1>Grua — reaprovisionamiento</h1>
+<div id="msg">Cargando tarea...</div>
+
+<div id="trabajo" class="oculto">
+  <div class="tarjeta">
+    <div class="de">Baje de</div>
+    <div class="ubic" id="dOrigen">—</div>
+    <div class="flecha">▼</div>
+    <div class="de">y deje en el picking</div>
+    <div class="ubic" id="dDestino">—</div>
+    <div class="prod" id="dProd">—</div>
+    <div class="cant" id="dCant">—</div>
+  </div>
+  <div class="tarjeta">
+    <div style="font-size:15px;color:#93a4bf;margin-bottom:8px;">Cantidad bajada</div>
+    <input id="cant" type="number" inputmode="numeric"
+           style="width:100%;font-size:36px;font-weight:800;text-align:center;padding:12px;
+                  border-radius:10px;border:2px solid #2b3d5c;background:#0b1220;color:#e6edf7;">
+    <button id="btnOk">CONFIRMAR BAJADA</button>
+  </div>
+</div>
+
+<div id="hecho" class="oculto" style="text-align:center;padding:40px 10px;">
+  <div style="font-size:60px;">✅</div>
+  <div>No quedan tareas de reapro.</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let tarea = null;
+function aviso(t, c) { $('msg').className = c || ''; $('msg').textContent = t; }
+
+async function cargar() {
+  const r = await fetch('/api/reapro/tarea');
+  const j = await r.json();
+  if (!j.ok) {
+    $('trabajo').classList.add('oculto');
+    $('hecho').classList.remove('oculto');
+    return;
+  }
+  tarea = j.tarea;
+  $('trabajo').classList.remove('oculto');
+  $('hecho').classList.add('oculto');
+  $('dOrigen').textContent = tarea.origen;
+  $('dDestino').textContent = tarea.destino;
+  $('dProd').textContent = tarea.descripcion || tarea.sku;
+  $('dCant').textContent = tarea.cantidad + ' cajas';
+  $('cant').value = tarea.cantidad;
+  $('btnOk').disabled = false;
+  aviso('Tarea ' + (j.hechas + 1) + ' de ' + j.total + '. Baje y confirme.');
+}
+
+$('btnOk').addEventListener('click', async () => {
+  const n = parseInt($('cant').value || '0', 10);
+  if (n <= 0) { aviso('Cantidad invalida', 'err'); return; }
+  const r = await fetch('/api/reapro/confirmar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: tarea.id, cantidad: n, usuario: 'GRUA1'}),
+  });
+  const j = await r.json();
+  if (!j.ok) { aviso('Error: ' + j.error, 'err'); return; }
+  aviso('✅ ' + j.cantidad + ' cajas de ' + j.origen + ' a ' + j.destino, 'ok');
+  setTimeout(cargar, 400);
+});
+
+cargar();
+</script>
+</body>
+</html>
+"""
+
+PAGINA_REAPRO = """<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Reaprovisionamiento</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 12px;
+         background: #0b1220; color: #e6edf7; font-size: 17px; }
+  h1 { font-size: 20px; margin: 0 0 10px; color: #93a4bf; font-weight: 600; }
+  .tarjeta { background:#16233a; border-radius:14px; padding:16px; margin-bottom:12px; }
+  table { width:100%; border-collapse: collapse; font-size:14px; }
+  th, td { text-align:left; padding:7px 6px; border-bottom:1px solid #2b3d5c; }
+  th { color:#93a4bf; font-weight:600; }
+  td.num { text-align:right; font-variant-numeric: tabular-nums; }
+  .bajo { color:#fca5a5; font-weight:700; }
+  .ok { color:#4ade80; }
+  button { width:100%; font-size:22px; font-weight:800; padding:18px; border:0;
+           border-radius:12px; color:#fff; background:#7c3aed; margin-top:10px; }
+  button:disabled { background:#334155; color:#94a3b8; }
+  #msg { padding:14px; border-radius:12px; min-height:50px; font-size:16px;
+         background:#16233a; margin-bottom:12px; }
+  #msg.ok { background:#14532d; color:#bbf7d0; }
+  #msg.err { background:#7f1d1d; color:#fecaca; }
+  input { width:100%; font-size:18px; padding:12px; border-radius:10px;
+          border:2px solid #2b3d5c; background:#0b1220; color:#e6edf7; }
+</style>
+</head>
+<body>
+<h1>Reaprovisionamiento — almacen a picking</h1>
+<div id="msg">Cargando lo que esta bajo el minimo...</div>
+
+<div class="tarjeta">
+  <div style="font-size:15px;color:#93a4bf;margin-bottom:8px;">
+    Ubicaciones de picking BAJO EL MINIMO
+  </div>
+  <table id="tabla"><tbody></tbody></table>
+</div>
+
+<div class="tarjeta">
+  <div style="font-size:15px;color:#93a4bf;margin-bottom:8px;">Asignar a operador de grua</div>
+  <input id="operador" placeholder="usuario del operador (ej. GRUA1)">
+  <button id="btnGenerar" disabled>GENERAR Y DESTINAR</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+function aviso(t, c) { $('msg').className = c || ''; $('msg').textContent = t; }
+
+async function cargar() {
+  const r = await fetch('/api/reapro/necesidades');
+  const j = await r.json();
+  const tb = $('tabla').querySelector('tbody');
+  tb.innerHTML = '';
+  const n = j.necesidades || [];
+  if (!n.length) {
+    tb.innerHTML = '<tr><td>Todo sobre el minimo. No hay nada que reponer.</td></tr>';
+    aviso('Nada bajo el minimo.', 'ok');
+    $('btnGenerar').disabled = true;
+    return;
+  }
+  n.forEach(x => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + x.ubicacion + '<br><small style="color:#93a4bf">' +
+      (x.descripcion || x.sku) + '</small></td>' +
+      '<td class="num"><span class="bajo">' + x.stock_actual + '</span> / ' +
+      x.minimo + '</td>' +
+      '<td class="num">' + x.reponer + '</td>' +
+      '<td class="num ' + (x.cubre ? 'ok' : 'bajo') + '">' +
+      (x.cubre ? x.disponible_origen : '⚠️ ' + x.disponible_origen) + '</td>';
+    tb.appendChild(tr);
+  });
+  aviso(n.length + ' ubicaciones bajo el minimo. Asigne un operador y genere.',
+        '');
+  $('btnGenerar').disabled = false;
+}
+
+$('operador').addEventListener('input', () => {
+  $('btnGenerar').disabled = !$('operador').value.trim();
+});
+
+$('btnGenerar').addEventListener('click', async () => {
+  const r = await fetch('/api/reapro/destinar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({operador: $('operador').value.trim(), usuario: 'SUPERVISOR'}),
+  });
+  const j = await r.json();
+  if (!j.ok) { aviso('Error: ' + j.error, 'err'); return; }
+  let t = '✅ ' + j.creadas + ' tareas creadas (' + j.cajas +
+          ' cajas) para ' + (j.operador || 'el operador') + '.';
+  if (j.sin_stock_suficiente && j.sin_stock_suficiente.length)
+    t += ' ⚠️ Sin stock suficiente para: ' + j.sin_stock_suficiente.join(', ');
+  aviso(t, 'ok');
+  cargar();
+});
+
+cargar();
 </script>
 </body>
 </html>
@@ -720,6 +926,38 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA_RECEPCION)
             return
 
+        if u.path == "/reapro":
+            self._html(PAGINA_REAPRO)
+            return
+
+        if u.path == "/grua":
+            self._html(PAGINA_GRUA)
+            return
+
+        if u.path == "/api/reapro/tarea":
+            from . import reapro
+            t = reapro.tarea_pendiente(self.db)
+            if t is None:
+                self._json({"ok": False})
+                return
+            self._json({"ok": True, "tarea": {
+                "id": t["id"], "origen": t["origen"], "destino": t["destino"],
+                "sku": t["sku"], "descripcion": t["descripcion"],
+                "cantidad": t["cantidad"],
+            }, "total": t["total"], "hechas": t["hechas"]})
+            return
+
+        if u.path == "/api/reapro/necesidades":
+            from . import reapro
+            items = reapro.calcular(self.db)
+            self._json({"ok": True, "necesidades": [{
+                "ubicacion": n.ubicacion_picking, "sku": n.sku,
+                "descripcion": n.descripcion, "stock_actual": n.stock_actual,
+                "minimo": n.minimo, "maximo": n.maximo, "reponer": n.reponer,
+                "disponible_origen": n.disponible_origen, "cubre": n.cubre,
+            } for n in items]})
+            return
+
         if u.path == "/api/recepcion/escanear":
             from . import gs1, recepcion as rc
             codigo = qs.get("codigo", [""])[0]
@@ -756,6 +994,27 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def do_POST(self):
         u = urlparse(self.path)
+
+        if u.path == "/api/reapro/confirmar":
+            from . import reapro
+            datos = self._cuerpo()
+            r = reapro.confirmar(self.db, int(datos.get("id", 0)),
+                                 int(datos.get("cantidad", 0) or 0),
+                                 str(datos.get("usuario", "")).strip())
+            if not r["ok"]:
+                self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
+                return
+            self._json(r)
+            return
+
+        if u.path == "/api/reapro/destinar":
+            from . import reapro
+            datos = self._cuerpo()
+            r = reapro.destinar(self.db,
+                                operador=str(datos.get("operador", "")).strip(),
+                                usuario=str(datos.get("usuario", "")).strip())
+            self._json(r)
+            return
 
         if u.path == "/api/dia/cerrar":
             from . import informe_dia

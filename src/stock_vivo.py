@@ -252,18 +252,26 @@ def ingresar(
     fecha_elaboracion: str = "",
     almacen: str = "",
 ) -> int:
-    """Ingresa mercaderia NUEVA al stock vivo (recepcion). Devuelve el id de la fila.
+    """Ingresa mercaderia al stock vivo (recepcion o reapro). Devuelve el id de la fila.
 
-    Si ya existe una fila con la misma ubicacion+lote+SKU, se SUMA la cantidad en
-    vez de crear una fila duplicada (el stock se acumula en el mismo lote).
+    Si ya existe una fila con la misma ubicacion + SKU + LOTE + VENCIMIENTO, se
+    SUMA la cantidad en vez de duplicar la fila. El vencimiento es parte de la
+    clave a proposito: si se fusionaran dos lotes con distinta caducidad, la fila
+    quedaria con una sola fecha y FEFO ordenaria mal.
     """
     from .externos import clave_sku
 
     clave = clave_sku(sku)
+    venc = fecha_orden(fecha_caducidad)
+
+    # Se busca una fila que coincida en ubicacion + SKU + lote Y vencimiento.
+    # El vencimiento TIENE que coincidir: si se fusionaran dos lotes con distinta
+    # caducidad, la fila quedaria con una sola fecha y FEFO ordenaria mal.
     existente = con.execute(
-        f"""SELECT id FROM {TABLA}
-             WHERE ubicacion = ? AND sku_clave = ? AND COALESCE(lpn,'') = ?""",
-        (ubicacion, clave, lpn or ""),
+        f"""SELECT id, fecha_caducidad FROM {TABLA}
+             WHERE ubicacion = ? AND sku_clave = ? AND COALESCE(lpn,'') = ?
+               AND COALESCE(fecha_ord,'') = ?""",
+        (ubicacion, clave, lpn or "", venc),
     ).fetchone()
 
     if existente:
@@ -279,7 +287,7 @@ def ingresar(
              fecha_caducidad, fecha_ord, cantidad)
             VALUES (?,?,?,?,?,?,?,?,?)""",
         (ubicacion, sku, clave, lpn or "", descripcion, area or AREA_RECEPCION,
-         fecha_caducidad, fecha_orden(fecha_caducidad), cantidad),
+         fecha_caducidad, venc, cantidad),
     )
     return int(cur.lastrowid)
 

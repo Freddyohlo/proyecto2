@@ -489,11 +489,11 @@ Mitigaciones implementadas:
 - **Botón "GENERAR INFORMES"** en la portada (`/`): genera y ofrece los enlaces
   al HTML y al Excel (`POST /api/informe/generar`; se sirven en `/informes/<archivo>`).
 - CLI: `python -m src.plan_b_main informe-dia [--fecha AAAA-MM-DD]`.
-- **Botón "CERRAR EL DÍA"** en la portada: libera las reservas que quedaron
-  colgando (tareas pendientes que no se pickearon) y genera el informe de cierre.
-  `picking.cerrar_dia()` marca las pendientes como `cerrada` y libera su reserva.
-  NO toca lo pickeado (eso ya salió físicamente). Sin esto, las reservas se
-  arrastran al día siguiente y el disponible queda artificialmente bajo.
+- **Botón "CERRAR EL DÍA"** en la portada: **cierre TOTAL** (criterio del usuario:
+  el sistema es para UN día, no se arrastra). Marca como `cerrada` toda tarea
+  pendiente, libera su reserva y **registra el cierre** en la tabla `cierres`
+  (fecha, usuario, totales). No se puede cerrar dos veces el mismo día.
+  `picking.cerrar_dia()`, `picking.cierre_de()`.
 
 ### SKU nuevos (producto que va llegando)
 - Llega mercadería que **no venía en la cuadratura** (producto nuevo). En vez de
@@ -506,6 +506,25 @@ Mitigaciones implementadas:
 - En la pantalla de recepción aparece el botón **"+ DAR DE ALTA ESTE SKU"** cuando
   el SKU escaneado no está en el stock (`origen: "codigo"`).
 - CLI: `python -m src.plan_b_main recepcion --sku-nuevo 700809 --cantidad 198 ...`.
+
+### Reaprovisionamiento guiado (almacén → picking)
+- `src/reapro.py` — detecta las ubicaciones de picking **bajo el mínimo** y genera
+  las tareas para un **operador de grúa**. Trabaja contra el **stock vivo** (respeta
+  reservas), no contra la foto.
+  - `calcular(db)` → necesidades (stock actual, mínimo, máximo, cuánto reponer,
+    cuánto hay en almacén, si alcanza).
+  - `destinar(db, operador)` → reserva el origen y crea las tareas asignadas al
+    operador. Tabla `reapro`.
+  - `confirmar()` → **mueve** almacenamiento → picking: descuenta del origen y
+    SUMA al destino, conservando lote y vencimiento.
+  - Regla: se repone **hasta el máximo** aunque se exceda (máx 200, quedan 5 → +200).
+- **Pantallas**: `/reapro` (dashboard del supervisor: qué está bajo el mínimo +
+  botón "GENERAR Y DESTINAR" con el operador) y `/grua` (lo que ve el operador de
+  grúa en su Zebra: "baje de X y deje en Y").
+- ⚠️ **Los lotes NO se mezclan**: al bajar de almacén a picking, si el vencimiento
+  es distinto queda como fila aparte (correcto para FEFO). Bug corregido en
+  `stock_vivo.ingresar()`: antes fusionaba por ubicación+lote+SKU sin mirar el
+  vencimiento, y la fila quedaba con una fecha sola.
 
 ### Inspección / exploración de pantallas
 - `tools/inspeccionar_ui.py` — lista los `auto_id` de la ventana (calibración UI)
@@ -528,9 +547,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **153 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **167 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (19).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (13).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

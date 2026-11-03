@@ -279,24 +279,41 @@ def confirmar(
 
 
 def cerrar_dia(db: str | Path, usuario: str = "", liberar: bool = True) -> dict:
-    """Cierra el dia: libera las reservas que quedaron colgando.
+    """Cierra el dia por completo: el sistema es para UN dia, no se arrastra.
 
-    Si el dia termina con tareas pendientes, esas cajas quedan RESERVADAS (tomadas)
-    sin haberse pickeado. Si no se liberan, se arrastran al dia siguiente y el
-    stock disponible queda artificialmente bajo.
+    Criterio del usuario: lo que no se pickeo, se cierra. No debe pasar de un dia.
 
     Lo que hace:
-      - Marca como 'cerrada' toda tarea pendiente.
+      - Marca como 'cerrada' TODA tarea pendiente (no queda nada abierto).
       - LIBERA su reserva, para que la mercaderia vuelva a estar disponible.
-      - NO toca las tareas hechas (ok/parcial/saltada): eso ya es historia.
-      - NO libera lo que se pickeo: eso ya salio fisicamente.
+      - Registra el cierre en la tabla `cierres` (fecha, quien, totales), para que
+        quede la traza de que ese dia se cerro y con que numeros.
+      - NO toca lo pickeado: eso ya salio fisicamente.
 
-    Devuelve el resumen de lo liberado.
+    Si el dia ya estaba cerrado, no lo vuelve a cerrar (devuelve ya_cerrado=True).
     """
     momento = datetime.now().isoformat(timespec="seconds")
+    fecha = datetime.now().strftime("%Y-%m-%d")
 
     with sv.abrir(db) as con:
         preparar_tablas(con)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS cierres (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fecha TEXT, momento TEXT, usuario TEXT,
+                tareas_cerradas INTEGER, cajas_liberadas INTEGER,
+                cajas_pickeadas INTEGER, cajas_recibidas INTEGER
+            )
+        """)
+
+        ya = con.execute(
+            "SELECT * FROM cierres WHERE fecha = ? ORDER BY id DESC LIMIT 1", (fecha,)
+        ).fetchone()
+        if ya:
+            return {"ok": True, "ya_cerrado": True, "fecha": fecha,
+                    "tareas_cerradas": int(ya["tareas_cerradas"]),
+                    "cajas_liberadas": int(ya["cajas_liberadas"]),
+                    "momento": ya["momento"]}
 
         pendientes = con.execute(
             f"""SELECT id, fila_stock, reservado, cantidad
@@ -316,8 +333,45 @@ def cerrar_dia(db: str | Path, usuario: str = "", liberar: bool = True) -> dict:
                 (momento, usuario),
             )
 
-    return {"ok": True, "tareas_cerradas": len(pendientes),
-            "cajas_liberadas": liberado, "momento": momento}
+        # Totales del dia, para dejarlos registrados en el cierre
+        pickeado = con.execute(
+            f"SELECT COALESCE(SUM(cantidad_ok),0) AS c FROM {TABLA_TAREAS} "
+            "WHERE estado IN ('ok','parcial')"
+        ).fetchone()["c"]
+        try:
+            recibidas = con.execute(
+                "SELECT COALESCE(SUM(cantidad),0) AS c FROM recepcion").fetchone()["c"]
+        except Exception:
+            recibidas = 0
+
+        con.execute(
+            """INSERT INTO cierres
+               (fecha, momento, usuario, tareas_cerradas, cajas_liberadas,
+                cajas_pickeadas, cajas_recibidas)
+               VALUES (?,?,?,?,?,?,?)""",
+            (fecha, momento, usuario, len(pendientes), liberado,
+             int(pickeado or 0), int(recibidas or 0)),
+        )
+
+    return {"ok": True, "ya_cerrado": False, "fecha": fecha,
+            "tareas_cerradas": len(pendientes), "cajas_liberadas": liberado,
+            "cajas_pickeadas": int(pickeado or 0),
+            "cajas_recibidas": int(recibidas or 0), "momento": momento}
+
+
+def cierre_de(db: str | Path, fecha: str = "") -> dict | None:
+    """Devuelve el cierre registrado de una fecha (o None si no se cerro)."""
+    fecha = fecha or datetime.now().strftime("%Y-%m-%d")
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        try:
+            f = con.execute(
+                "SELECT * FROM cierres WHERE fecha = ? ORDER BY id DESC LIMIT 1",
+                (fecha,),
+            ).fetchone()
+        except Exception:
+            return None
+    return dict(f) if f else None
 
 
 def saltar(db: str | Path, id_tarea: int, usuario: str = "") -> dict:

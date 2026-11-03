@@ -209,6 +209,16 @@ def test_crear_sku_reporta_el_area(db):
 # Cierre del dia
 # --------------------------------------------------------------------------
 
+def test_cierre_queda_registrado(db):
+    """El cierre se guarda con fecha y totales, para que quede la traza."""
+    pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
+    pk.cerrar_dia(db, "SUPERVISOR")
+    c = pk.cierre_de(db)
+    assert c is not None
+    assert c["usuario"] == "SUPERVISOR"
+    assert c["cajas_liberadas"] == 10
+
+
 def test_cerrar_dia_libera_las_reservas_colgando(db):
     """Lo no pickeado vuelve a estar disponible al cerrar el dia."""
     pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
@@ -246,8 +256,13 @@ def test_cerrar_dia_marca_las_tareas_como_cerradas(db):
 
 
 def test_cerrar_dia_dos_veces_no_rompe(db):
+    """El cierre es total y de UN dia: el segundo intento no vuelve a cerrar."""
     pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
-    pk.cerrar_dia(db, "S1")
+    primera = pk.cerrar_dia(db, "S1")
+    assert primera["ok"] is True and primera["ya_cerrado"] is False
+
     segunda = pk.cerrar_dia(db, "S1")
     assert segunda["ok"] is True
-    assert segunda["tareas_cerradas"] == 0
+    assert segunda["ya_cerrado"] is True, "el dia ya estaba cerrado"
+    # Y no libera dos veces
+    assert sv.resumen(db)["reservado"] == 0
