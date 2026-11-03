@@ -282,7 +282,8 @@ python -m src.plan_b_main informe
 | 1 Visor offline (SQLite + consultas) | ✅ implementado |
 | 3 Reaprovisionamiento (mín/máx) | ✅ implementado (falta capacidad) |
 | 2 Picking FEFO | 🟡 falta: asignación FEFO (la venta/TRUCK ya está) |
-| 4 Reincorporación al sistema | ⏳ falta: cómo se reingresan los datos |
+| 4 Reincorporación al sistema | 🟡 **resuelto en el diseño**: BY se reincorpora solo; la informacion manual se reingresa a mano, pero queda RESPALDADA por nuestro sistema |
+| 5 Recepción (tránsito → recibir → ubicar) | 🟡 prototipo con tarja real (`src/recepcion.py`) |
 | 6 Contraste venta vs stock vs tránsito | ✅ implementado (`src/contraste.py`) |
 | 7 Picking en terminales RF Zebra | 🟡 prototipo web funcionando (`src/picking_servidor.py`) |
 
@@ -434,6 +435,16 @@ Mitigaciones implementadas:
   tarea queda `parcial` y **lo que falta se re-encola** como tarea nueva.
   `parsear_ubicacion()` acepta el QR en varios formatos.
 
+### Recepción (entrada de mercadería)
+- `docs/PLAN_B_recepcion.md` — diseno del flujo (recibir → ubicar) con la tarja real.
+- `src/recepcion.py` — `recibir()` (idempotente por LPN), `ubicar()` (conserva
+  lote y vencimiento), `sugerir_ubicacion()`, `pendientes()`, `resumen()`.
+  Pantalla: `http://<IP>:8080/recepcion`.
+  ⚠️ La tarja trae el vencimiento **solo impreso** (no por sistema): sin el, FEFO
+  no puede ordenar. El sistema lo avisa si falta.
+  ⚠️ El LPN de la tarja (18 digitos) NO coincide con los de la cuadratura
+  (`CD8000...` de 14, o `D000...` de 11): falta confirmar a cual corresponde.
+
 ### Inspección / exploración de pantallas
 - `tools/inspeccionar_ui.py` — lista los `auto_id` de la ventana (calibración UI)
 - `tools/probar_captura.py` — login + copia de la grilla (sin correo)
@@ -455,9 +466,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **80 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **95 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (15).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

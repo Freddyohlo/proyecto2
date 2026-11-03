@@ -33,6 +33,175 @@ from . import picking as pk
 
 DB_DEFECTO = "data/plan_b.sqlite"
 
+PAGINA_RECEPCION = """<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Recepcion contingencia</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 12px;
+         background: #0b1220; color: #e6edf7; font-size: 20px; }
+  h1 { font-size: 20px; margin: 0 0 10px; color: #93a4bf; font-weight: 600; }
+  .tarjeta { background: #16233a; border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .etq { font-size: 15px; color: #93a4bf; margin-bottom: 6px; }
+  input { width: 100%; font-size: 24px; padding: 14px; border-radius: 12px;
+          border: 2px solid #2b3d5c; background: #0b1220; color: #e6edf7; }
+  input:focus { outline: none; border-color: #38bdf8; }
+  .fila { display: flex; gap: 10px; }
+  .fila > * { flex: 1; }
+  button { width: 100%; font-size: 24px; font-weight: 800; padding: 18px;
+           border: 0; border-radius: 12px; color: #fff; margin-top: 10px; }
+  #btnRecibir { background: #16a34a; }
+  #btnRecibir:disabled { background: #334155; color: #94a3b8; }
+  .gris { background: #475569; font-size: 17px; padding: 13px; }
+  #msg { padding: 14px; border-radius: 12px; min-height: 52px; font-size: 18px;
+         background: #16233a; margin-bottom: 12px; }
+  #msg.ok { background: #14532d; color: #bbf7d0; }
+  #msg.err { background: #7f1d1d; color: #fecaca; }
+  #msg.aviso { background: #78350f; color: #fde68a; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 8px; }
+  th, td { text-align: left; padding: 6px; border-bottom: 1px solid #2b3d5c; }
+  .oculto { display: none; }
+</style>
+</head>
+<body>
+
+<h1>Recepcion — contingencia</h1>
+<div id="msg">Escanee el LPN de la tarja.</div>
+
+<div class="tarjeta">
+  <div class="etq">LPN (tarja)</div>
+  <input id="lpn" autocomplete="off" autofocus placeholder="escaneando...">
+
+  <div id="resto" class="oculto" style="margin-top:12px;">
+    <div class="etq">SKU</div>
+    <input id="sku" autocomplete="off">
+
+    <div class="etq" style="margin-top:10px;">Cantidad</div>
+    <input id="cantidad" type="number" inputmode="numeric" min="1">
+
+    <div class="fila" style="margin-top:10px;">
+      <div>
+        <div class="etq">Elaboracion</div>
+        <input id="elaboracion" placeholder="dd/mm/aaaa">
+      </div>
+      <div>
+        <div class="etq">Vencimiento</div>
+        <input id="vencimiento" placeholder="dd/mm/aaaa">
+      </div>
+    </div>
+
+    <div class="etq" style="margin-top:10px;">Ubicacion sugerida (de la tarja)</div>
+    <input id="ubicacion" placeholder="ej. C16-01-01-01">
+  </div>
+
+  <button id="btnRecibir" disabled>RECIBIR</button>
+</div>
+
+<div class="tarjeta">
+  <div class="etq">Pendientes de ubicar</div>
+  <table id="pend"><tbody></tbody></table>
+</div>
+
+<div class="tarjeta">
+  <div class="etq">Ubicar mercaderia</div>
+  <div class="fila">
+    <input id="destino" placeholder="ubicacion final">
+    <button id="btnUbicar" class="gris" style="margin-top:0;">UBICAR</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const lpn = $('lpn'), sku = $('sku'), cant = $('cantidad'), msg = $('msg');
+const elab = $('elaboracion'), venc = $('vencimiento'), ubic = $('ubicacion');
+const btn = $('btnRecibir'), destino = $('destino');
+let idSeleccion = null;
+
+function aviso(t, c) { msg.className = c || ''; msg.textContent = t; }
+
+// Paso 1: escanear el LPN
+lpn.addEventListener('change', () => {
+  if (!lpn.value.trim()) return;
+  $('resto').classList.remove('oculto');
+  aviso('LPN ' + lpn.value.trim() + '. Complete SKU, cantidad y vencimiento.', '');
+  sku.focus();
+});
+
+// Habilita RECIBIR cuando estan los datos minimos
+['input','change'].forEach(ev => {
+  [sku, cant].forEach(el => el.addEventListener(ev, () => {
+    btn.disabled = !(lpn.value.trim() && sku.value.trim() && parseInt(cant.value || '0') > 0);
+  }));
+});
+
+btn.addEventListener('click', async () => {
+  const cuerpo = {
+    lpn: lpn.value.trim(), sku: sku.value.trim(),
+    cantidad: parseInt(cant.value || '0', 10),
+    elaboracion: elab.value.trim(), vencimiento: venc.value.trim(),
+    ubicacion: ubic.value.trim(), usuario: 'RECEPTOR',
+  };
+  const r = await fetch('/api/recepcion/recibir', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cuerpo),
+  });
+  const j = await r.json();
+  if (!j.ok) { aviso('❌ ' + j.error, 'err'); return; }
+  aviso(j.aviso_vencimiento
+        ? '⚠️ Recibido sin vencimiento: FEFO no podra ordenar este lote.'
+        : '✅ Recibido: ' + j.cantidad + ' cajas de ' + j.sku, 
+        j.aviso_vencimiento ? 'aviso' : 'ok');
+  lpn.value = ''; sku.value = ''; cant.value = ''; elab.value = ''; venc.value = '';
+  ubic.value = ''; btn.disabled = true; $('resto').classList.add('oculto');
+  lpn.focus();
+  cargarPendientes();
+});
+
+async function cargarPendientes() {
+  const r = await fetch('/api/recepcion/pendientes');
+  const j = await r.json();
+  const tb = $('pend').querySelector('tbody');
+  tb.innerHTML = '';
+  (j.pendientes || []).forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + p.lpn + '</td><td>' + p.sku + '</td>' +
+                   '<td>' + p.cantidad + '</td><td>' + (p.fecha_vencimiento || '—') + '</td>';
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => {
+      idSeleccion = p.id;
+      destino.value = p.ubicacion_sugerida || '';
+      destino.focus();
+      aviso('Ubicar LPN ' + p.lpn + ' (' + p.cantidad + ' cajas). Destino?', '');
+    };
+    tb.appendChild(tr);
+  });
+  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="4">(nada pendiente)</td></tr>';
+}
+
+$('btnUbicar').addEventListener('click', async () => {
+  if (!idSeleccion) { aviso('Toque primero una fila de la lista.', 'err'); return; }
+  if (!destino.value.trim()) { aviso('Escriba la ubicacion final.', 'err'); return; }
+  const r = await fetch('/api/recepcion/ubicar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: idSeleccion, ubicacion: destino.value.trim(),
+                          usuario: 'RECEPTOR'}),
+  });
+  const j = await r.json();
+  if (!j.ok) { aviso('❌ ' + j.error, 'err'); return; }
+  aviso('✅ ' + j.cantidad + ' cajas de ' + j.sku + ' ubicadas en ' + j.ubicacion, 'ok');
+  idSeleccion = null; destino.value = '';
+  cargarPendientes();
+});
+
+cargarPendientes();
+</script>
+</body>
+</html>
+"""
+
 PAGINA = """<!doctype html>
 <html lang="es">
 <head>
@@ -309,6 +478,22 @@ class Handler(BaseHTTPRequestHandler):
             }, "total": t["total"], "hechas": t["hechas"]})
             return
 
+        if u.path == "/recepcion":
+            self._html(PAGINA_RECEPCION)
+            return
+
+        if u.path == "/api/recepcion/pendientes":
+            from . import recepcion as rc
+            pend = rc.pendientes(self.db)
+            self._json({"ok": True, "pendientes": pend.to_dict("records")})
+            return
+
+        if u.path == "/api/recepcion/sugerir":
+            from . import recepcion as rc
+            s = rc.sugerir_ubicacion(self.db, qs.get("sku", [""])[0])
+            self._json(s)
+            return
+
         if u.path == "/api/verificar":
             esperada = qs.get("ubicacion", [""])[0].strip()
             leida = parsear_ubicacion(qs.get("codigo", [""])[0])
@@ -341,6 +526,38 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             r = pk.confirmar(self.db, id_tarea, digitada, usuario)
+            if not r["ok"]:
+                self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
+                return
+            self._json(r)
+            return
+
+        if u.path == "/api/recepcion/recibir":
+            from . import recepcion as rc
+            datos = self._cuerpo()
+            r = rc.recibir(self.db, rc.Recepcion(
+                lpn=str(datos.get("lpn", "")).strip(),
+                sku=str(datos.get("sku", "")).strip(),
+                cantidad=int(datos.get("cantidad", 0) or 0),
+                ubicacion=str(datos.get("ubicacion", "")).strip(),
+                almacen=str(datos.get("almacen", "")).strip(),
+                descripcion=str(datos.get("descripcion", "")).strip(),
+                fecha_elaboracion=rc.normalizar_fecha(datos.get("elaboracion")),
+                fecha_vencimiento=rc.normalizar_fecha(datos.get("vencimiento")),
+                usuario=str(datos.get("usuario", "")).strip(),
+            ))
+            if not r["ok"]:
+                self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
+                return
+            self._json(r)
+            return
+
+        if u.path == "/api/recepcion/ubicar":
+            from . import recepcion as rc
+            datos = self._cuerpo()
+            r = rc.ubicar(self.db, int(datos.get("id", 0)),
+                          str(datos.get("ubicacion", "")).strip(),
+                          str(datos.get("usuario", "")).strip())
             if not r["ok"]:
                 self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
                 return

@@ -300,6 +300,60 @@ def cmd_stock_vivo(args) -> int:
     return 0
 
 
+def cmd_recepcion(args) -> int:
+    from . import recepcion as rc
+
+    ruta = Path(args.db)
+
+    if args.recibir:
+        r = rc.recibir(ruta, rc.Recepcion(
+            lpn=args.lpn, sku=args.sku, cantidad=args.cantidad,
+            ubicacion=args.ubicacion or "", almacen=args.almacen or "",
+            descripcion=args.descripcion or "",
+            fecha_elaboracion=rc.normalizar_fecha(args.elaboracion),
+            fecha_vencimiento=rc.normalizar_fecha(args.vencimiento),
+            usuario=args.usuario or "",
+        ))
+        if not r["ok"]:
+            print(f"[!] {r['error']}")
+            return 1
+        print(f"Recibido: LPN {r['lpn']} | SKU {r['sku']} | {r['cantidad']} cajas")
+        if r.get("aviso_vencimiento"):
+            print("⚠️ Sin fecha de vencimiento: FEFO no podra ordenar este lote.")
+        return 0
+
+    if args.ubicar:
+        r = rc.ubicar(ruta, args.ubicar, args.destino, args.usuario or "")
+        if not r["ok"]:
+            print(f"[!] {r['error']}")
+            return 1
+        print(f"Ubicado: LPN {r['lpn']} ({r['cantidad']} cajas) -> {r['ubicacion']}")
+        print(f"  vence {r['vencimiento'] or '(sin vencimiento)'}")
+        return 0
+
+    if args.sugerir:
+        s = rc.sugerir_ubicacion(ruta, args.sugerir)
+        if s["ok"]:
+            print(f"Sugerencia: {s['ubicacion']}  ({s['motivo']})")
+        else:
+            print(f"Sin sugerencia: {s['motivo']}")
+        return 0
+
+    # Por defecto: mostrar el estado
+    r = rc.resumen(ruta)
+    print("Recepcion:")
+    print(f"  Recepciones : {r['recepciones']}  ({r['cajas']} cajas)")
+    print(f"  Pendientes  : {r['pendientes']} sin ubicar")
+    print(f"  Ubicadas    : {r['ubicadas']}")
+    if r["sin_vencimiento"]:
+        print(f"  ⚠️ {r['sin_vencimiento']} sin fecha de vencimiento")
+    pend = rc.pendientes(ruta)
+    if not pend.empty:
+        print("\nPendientes de ubicar:")
+        print(pend.to_string(index=False))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Plan B — contingencia offline de Blue Yonder")
     ap.add_argument("--db", default=DB, help=f"Base SQLite (default {DB})")
@@ -362,6 +416,23 @@ def main() -> int:
     p.add_argument("--detalle", action="store_true",
                    help="Muestra las filas con movimiento")
     p.set_defaults(func=cmd_stock_vivo)
+
+    p = sub.add_parser("recepcion", help="Recepcion: recibir (tarja) y ubicar")
+    p.add_argument("--recibir", action="store_true", help="Registrar mercaderia recibida")
+    p.add_argument("--lpn", default="", help="LPN de la tarja")
+    p.add_argument("--sku", default="", help="SKU")
+    p.add_argument("--cantidad", type=int, default=0, help="Cajas recibidas")
+    p.add_argument("--ubicacion", default="", help="Ubicacion sugerida (de la tarja)")
+    p.add_argument("--almacen", default="", help="Almacen (ej. CD8000)")
+    p.add_argument("--descripcion", default="")
+    p.add_argument("--elaboracion", default="", help="Fecha de elaboracion (dd/mm/aaaa)")
+    p.add_argument("--vencimiento", default="", help="Fecha de vencimiento (dd/mm/aaaa)")
+    p.add_argument("--usuario", default="")
+    p.add_argument("--ubicar", type=int, default=0,
+                   help="Id de recepcion a ubicar (paso 2)")
+    p.add_argument("--destino", default="", help="Ubicacion final al ubicar")
+    p.add_argument("--sugerir", default="", help="Sugerir ubicacion para un SKU")
+    p.set_defaults(func=cmd_recepcion)
 
     args = ap.parse_args()
     return args.func(args)

@@ -31,6 +31,12 @@ import pandas as pd
 
 TABLA = "stock_vivo"
 
+# Area donde se registra la mercaderia recien recibida (antes de ubicarla).
+AREA_RECEPCION = "RECEPCION"
+
+# Area destino habitual al ubicar (ubicaciones en altura).
+AREA_ALMACENAMIENTO = "AREA ALMACENAMIENTO"
+
 
 # ---------------------------------------------------------------------------
 # Conexion
@@ -226,6 +232,58 @@ def filas_disponibles(con: sqlite3.Connection, sku_clave: str,
                   ubicacion
     """
     return con.execute(sql, (sku_clave,)).fetchall()
+
+
+def ingresar(
+    con: sqlite3.Connection,
+    ubicacion: str,
+    sku: str,
+    cantidad: int,
+    lpn: str = "",
+    descripcion: str = "",
+    area: str = "",
+    fecha_caducidad: str = "",
+    fecha_elaboracion: str = "",
+    almacen: str = "",
+) -> int:
+    """Ingresa mercaderia NUEVA al stock vivo (recepcion). Devuelve el id de la fila.
+
+    Si ya existe una fila con la misma ubicacion+lote+SKU, se SUMA la cantidad en
+    vez de crear una fila duplicada (el stock se acumula en el mismo lote).
+    """
+    from .externos import clave_sku
+
+    clave = clave_sku(sku)
+    existente = con.execute(
+        f"""SELECT id FROM {TABLA}
+             WHERE ubicacion = ? AND sku_clave = ? AND COALESCE(lpn,'') = ?""",
+        (ubicacion, clave, lpn or ""),
+    ).fetchone()
+
+    if existente:
+        con.execute(
+            f"UPDATE {TABLA} SET cantidad = cantidad + ? WHERE id = ?",
+            (cantidad, existente["id"]),
+        )
+        return int(existente["id"])
+
+    cur = con.execute(
+        f"""INSERT INTO {TABLA}
+            (ubicacion, sku, sku_clave, lpn, descripcion, area,
+             fecha_caducidad, fecha_ord, cantidad)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+        (ubicacion, sku, clave, lpn or "", descripcion, area or AREA_RECEPCION,
+         fecha_caducidad, fecha_orden(fecha_caducidad), cantidad),
+    )
+    return int(cur.lastrowid)
+
+
+def total_ingresado(con: sqlite3.Connection, area: str = AREA_RECEPCION) -> int:
+    """Cuantas unidades se ingresaron por recepcion en un area."""
+    fila = con.execute(
+        f"SELECT COALESCE(SUM(cantidad),0) AS c FROM {TABLA} WHERE area = ?", (area,)
+    ).fetchone()
+    return int(fila["c"] or 0)
 
 
 def estado(db: str | Path) -> pd.DataFrame:
