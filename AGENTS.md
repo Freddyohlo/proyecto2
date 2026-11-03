@@ -462,8 +462,16 @@ Mitigaciones implementadas:
   prellena cantidad, vencimiento y elaboracion con un solo escaneo.
   - BUG encontrado: al cortar los AIs variables sin separador, "198" se partia en
     "1"+AI(98) y la cantidad salia 1. Los AIs internos 90-99 NO se usan como corte.
-  - PENDIENTE: confirmar con un escaneo REAL el orden de los AIs y si el SKU viene
-    dentro del codigo (probablemente AI interno 90-99 o 240).
+  - El SKU TAMBIEN viene dentro del codigo (confirmado por el usuario). Como no se
+    pudo obtener el texto crudo, `recepcion.identificar_sku()` lo descubre solo:
+    (a) ancla en el SSCC (se reconoce por su digito de control: `gs1.ubicar_sscc`),
+    (b) junta candidatos (AIs 240/241/90-99 + numeros post-SSCC),
+    (c) elige el que EXISTE en el stock cargado. Si ninguno calza, usa el mas
+    probable y avisa (`origen: "codigo"`).
+  - El codigo sin separador FNC1 es ambiguo: `gs1.parsear` genera TODAS las
+    interpretaciones y elige la de mayor puntaje (`_puntaje`).
+  - Resultado: UN escaneo llena todo (SKU, cantidad, vencimiento, elaboracion).
+    PENDIENTE: con un escaneo real, fijar el AI exacto del SKU.
 - Portada con menu en `/` (Pickear / Recibir / Ver estado); picking en `/picking`.
 - `src/recepcion.py` — `recibir()` (idempotente por LPN), `ubicar()` (conserva
   lote y vencimiento), `sugerir_ubicacion()`, `pendientes()`, `resumen()`.
@@ -494,9 +502,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **125 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **134 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (18).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

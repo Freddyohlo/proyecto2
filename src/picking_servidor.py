@@ -211,15 +211,20 @@ lpn.addEventListener('change', async () => {
   const g = (j.gs1 || {});
 
   let llenos = [];
+  const sd = (j.sku_detectado || {});
+  if (sd.sku) { sku.value = sd.sku; llenos.push('SKU ' + sd.sku +
+    (sd.origen === 'stock' ? ' (confirmado en stock)' : '')); }
   if (g.cantidad) { cant.value = g.cantidad; llenos.push('cantidad ' + g.cantidad); }
   if (g.fecha_vencimiento) { venc.value = g.fecha_vencimiento; llenos.push('vence ' + g.fecha_vencimiento); }
   if (g.fecha_elaboracion) { elab.value = g.fecha_elaboracion; llenos.push('elab ' + g.fecha_elaboracion); }
   if (g.lote) { llenos.push('lote ' + g.lote); }
 
   if (llenos.length) {
-    $('trajo').textContent = '✅ El codigo trajo: ' + llenos.join(' | ');
+    $('trajo').textContent = '✅ El codigo trajo: ' + llenos.join(' | ') +
+      (sd.aviso ? '  ⚠️ ' + sd.aviso : '');
     $('trajo').classList.remove('oculto');
-    aviso('Complete el SKU y la ubicacion, y confirme.', 'ok');
+    aviso(sku.value ? 'Revise la cantidad y la ubicacion, y confirme.'
+                    : 'Complete el SKU y la ubicacion, y confirme.', 'ok');
   } else {
     $('trajo').classList.add('oculto');
     aviso('El codigo no trajo mas datos. Complete a mano.', 'aviso');
@@ -627,10 +632,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/recepcion/escanear":
-            from . import gs1
+            from . import gs1, recepcion as rc
             codigo = qs.get("codigo", [""])[0]
             e = gs1.parsear(codigo)
+            # El SKU viene dentro del codigo: se detecta cruzando con el stock.
+            sku = rc.identificar_sku(self.db, codigo)
             self._json({"ok": True, "gs1": e.resumen(),
+                        "desglose": gs1.describir(codigo),
+                        "sku_detectado": sku,
                         "es_gs1": gs1.es_gs1(codigo)})
             return
 
@@ -690,9 +699,12 @@ class Handler(BaseHTTPRequestHandler):
             escaneo = str(datos.get("escaneo", "")).strip()
             if escaneo:
                 # El codigo de barras de la tarja trae los datos: se llenan solos.
+                sku_pantalla = str(datos.get("sku", "")).strip()
+                if not sku_pantalla:
+                    sku_pantalla = rc.identificar_sku(self.db, escaneo).get("sku", "")
                 recep = rc.desde_escaneo(
                     escaneo,
-                    sku=str(datos.get("sku", "")).strip(),
+                    sku=sku_pantalla,
                     cantidad=int(datos.get("cantidad", 0) or 0),
                     ubicacion=str(datos.get("ubicacion", "")).strip(),
                     almacen=str(datos.get("almacen", "")).strip(),

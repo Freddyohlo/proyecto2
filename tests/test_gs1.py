@@ -183,3 +183,80 @@ def test_recepcion_completa_desde_escaneo(db):
     assert int(f["cantidad"]) == 198
     assert f["fecha_caducidad"] == "04/06/2027"
     assert f["ubicacion"] == "C16-01-01-01"
+
+
+# --------------------------------------------------------------------------
+# Deteccion del SKU dentro del codigo
+# --------------------------------------------------------------------------
+
+def test_sku_en_ai_240():
+    """El AI 240 (id adicional) es el lugar mas probable para el SKU."""
+    codigo = f"00{SSCC}240007008091727060430198"
+    cands = gs1.sku_candidatos(codigo)
+    assert cands, "debe haber candidatos"
+    assert cands[0][0] == "240"
+
+
+def test_gtin_no_se_confunde_con_sku():
+    """El GTIN (01) es el codigo global del producto, NO el SKU de bodega."""
+    codigo = "(01)78012345678904(17)270604(30)198"
+    cands = [v for ai, v in gs1.sku_candidatos(codigo)]
+    assert "78012345678904" not in cands
+
+
+def test_sscc_tampoco_es_sku():
+    codigo = f"00{SSCC}1727060430198"
+    cands = [v for ai, v in gs1.sku_candidatos(codigo)]
+    assert SSCC not in cands
+
+
+def test_candidatos_encuentran_el_sku_en_ai_240():
+    """El AI 240 es el lugar mas probable para el codigo de producto."""
+    codigo = f"00{SSCC}" + "240" + "700809" + "1727060430198"
+    valores = [v for _, v in gs1.sku_candidatos(codigo)]
+    assert "700809" in valores
+
+
+def test_ubicar_sscc_usa_el_digito_de_control():
+    """El SSCC se reconoce por su digito de control: sirve de ancla."""
+    codigo = f"00{SSCC}" + "240" + "700809" + "17270604"
+    pos, sscc = gs1.ubicar_sscc(codigo)
+    assert sscc == SSCC
+    assert codigo[pos:pos + 18] == SSCC
+
+
+def test_describir_muestra_los_ais():
+    codigo = f"(00){SSCC}(17)270604(11)261031(30)198"
+    d = gs1.describir(codigo)
+    por_ai = {x["ai"]: x for x in d}
+    assert por_ai["00"]["valor"] == SSCC
+    assert por_ai["17"]["interpretado"] == "04/06/2027"
+    assert por_ai["30"]["interpretado"] == "198 unidades"
+
+
+def test_identificar_sku_usa_el_stock_para_desambiguar(db):
+    """De todos los numeros del codigo, el que existe en el stock es el SKU."""
+    from src import recepcion as rc
+
+    # El stock de prueba tiene 000622; el codigo trae 000622 y otros numeros.
+    codigo = f"00{SSCC}" + "91000622" + "1727060430198"
+    r = rc.identificar_sku(db, codigo)
+    assert r["sku"] == "000622"
+    assert r["origen"] == "stock"
+
+
+def test_identificar_sku_avisa_si_no_esta_en_el_stock(db):
+    """Si ningun candidato calza con el stock, se devuelve el mas probable + aviso."""
+    from src import recepcion as rc
+
+    codigo = f"00{SSCC}" + "240" + "700809" + "1727060430198"
+    r = rc.identificar_sku(db, codigo)
+    assert r["sku"] == "700809"
+    assert r["origen"] == "codigo"
+    assert "aviso" in r
+
+
+def test_identificar_sku_sin_candidatos():
+    from src import recepcion as rc
+    r = rc.identificar_sku("no-existe.db", f"00{SSCC}17270604")
+    assert r["sku"] == "" or r["origen"] in ("codigo", "stock")

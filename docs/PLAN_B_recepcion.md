@@ -174,9 +174,40 @@ Con `recibir_y_ubicar()`, si la ubicación viene en la tarja, es **un solo toque
 `src/gs1.py` — `parsear()` (tolera con/sin paréntesis, con/sin separador, y el
 SSCC pelado de las tarjas viejas), `_fecha_gs1()`, `es_gs1()`.
 
-> **Pendiente de confirmar con un escaneo real:** el orden exacto de los AIs y si
-> CCU incluye el SKU dentro del código (probablemente en un AI interno `90-99` o
-> en `240`). Con el texto crudo de un escaneo real se ajusta en minutos.
+### ✅ El SKU también viene dentro del código
+
+**Confirmado por el usuario.** Como no se pudo obtener el texto crudo de un
+escaneo, el sistema **descubre solo** cuál de los números es el SKU, sin adivinar
+el formato:
+
+1. **Ancla en el SSCC.** El SSCC se reconoce sin saber el formato del resto porque
+   tiene **dígito de control**: se prueban ventanas de 18 dígitos y la que valida
+   es el SSCC. Eso marca dónde empiezan los demás datos.
+2. **Candidatos.** Se juntan los AIs típicos del código de producto (`240`, `241`,
+   `90-99`) y los números que vienen después del SSCC.
+3. **Desambiguación con el stock.** De todos los números, el que **existe en
+   nuestra cuadratura** es el SKU. El catálogo de SKU es el que decide, no una
+   suposición.
+
+Si ningún candidato calza con el stock, se usa el más probable y **se avisa**
+(`origen: "codigo"` + `aviso`), en vez de fallar en silencio.
+
+### ⚠️ El código sin separadores es ambiguo
+Muchos lectores no mandan el separador FNC1. En ese caso no se sabe dónde corta un
+valor variable. En vez de tomar la primera lectura, el parser genera **todas las
+interpretaciones posibles** y elige la de **mayor puntaje** (premia un SSCC válido,
+fechas interpretables y cantidades razonables; castiga valores absurdos).
+
+### Resultado final
+
+```
+Antes:  escanear LPN + digitar SKU + cantidad + vencimiento + elaboración + ubicación
+Ahora:  UN escaneo  →  el sistema llena TODO  →  confirmar
+```
+
+> **Pendiente:** con el texto crudo de un escaneo real se puede fijar el AI exacto
+> del SKU y dejar de usar la heurística. Mientras tanto, funciona y avisa cuando
+> no está seguro.
 
 ---
 

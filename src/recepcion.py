@@ -76,11 +76,13 @@ def normalizar_fecha(texto: object) -> str:
 # SSCC: el LPN de la tarja es un codigo GS1 estandar
 # ---------------------------------------------------------------------------
 
-def digito_control_sscc(sscc: str) -> int | None:
-    """Calcula el digito de control de un SSCC (modulo 10, GS1).
+# El SSCC se valida con la misma funcion que usa el lector GS1: una sola
+# fuente de verdad (src/gs1.py).
+from .gs1 import sscc_valido  # noqa: E402
 
-    Devuelve None si no es un SSCC de 18 digitos.
-    """
+
+def digito_control_sscc(sscc: str) -> int | None:
+    """Digito de control de un SSCC (modulo 10, GS1). None si no aplica."""
     if not sscc or len(sscc) != 18 or not sscc.isdigit():
         return None
     suma = 0
@@ -89,31 +91,32 @@ def digito_control_sscc(sscc: str) -> int | None:
     return (10 - (suma % 10)) % 10
 
 
-def sscc_valido(sscc: str) -> bool:
-    """True si el SSCC tiene 18 digitos y su digito de control es correcto."""
-    esperado = digito_control_sscc(sscc)
-    return esperado is not None and esperado == int(sscc[-1])
-
-
 def desde_escaneo(codigo: str, sku: str = "", cantidad: int = 0,
                   ubicacion: str = "", almacen: str = "",
                   descripcion: str = "", usuario: str = "",
-                  fecha: str = "") -> Recepcion:
+                  fecha: str = "", sku_detectado: str = "") -> Recepcion:
     """Arma una Recepcion a partir del codigo de barras GS1-128 de la tarja.
 
     El escaneo llena solo: SSCC, vencimiento, elaboracion, cantidad y lote.
-    Lo que NO viene en el codigo (SKU, ubicacion, almacen, descripcion) se toma
-    de los parametros, que pueden venir de la pantalla o quedar vacios para que
-    el operario los complete.
+    El SKU tambien viene DENTRO del codigo; si `sku_detectado` viene vacio, se
+    intenta detectar con `identificar_sku()` (sin cruzar contra el stock, porque
+    aca no tenemos la base a mano).
 
-    Si el escaneo no trae cantidad, se usa la que venga por parametro.
+    Lo que no venga en el codigo se toma de los parametros, para que la pantalla
+    pueda completarlo.
     """
     from . import gs1
 
     e = gs1.parsear(codigo)
+    sku_final = sku or sku_detectado
+    if not sku_final:
+        candidatos = gs1.sku_candidatos(codigo)
+        if candidatos:
+            sku_final = candidatos[0][1]
+
     return Recepcion(
         lpn=e.sscc or str(codigo or "").strip(),
-        sku=sku,
+        sku=sku_final,
         cantidad=e.cantidad or cantidad,
         ubicacion=ubicacion,
         almacen=almacen,
@@ -123,6 +126,64 @@ def desde_escaneo(codigo: str, sku: str = "", cantidad: int = 0,
         usuario=usuario,
         fecha=fecha,
     )
+
+
+def identificar_sku(db: str | Path, codigo: str) -> dict:
+    """Averigua cual de los numeros del codigo es el SKU real.
+
+    El codigo GS1 sin separadores es ambiguo: no se sabe donde corta cada valor.
+    En vez de adivinar el formato, se buscan **todas** las secuencias numericas
+    del texto y se elige la que **existe en el stock**. El catalogo de SKU es el
+    que desambigua.
+
+    Devuelve {"sku", "origen", "candidatos"} y un "aviso" si nada calzo.
+    """
+    import re
+
+    from . import gs1
+
+    crudo = gs1._limpiar(codigo)
+    if not crudo:
+        return {"sku": "", "origen": "", "candidatos": []}
+
+    # SKU conocidos en el stock, normalizados (sin ceros a la izquierda)
+    try:
+        with sv.abrir(db) as con:
+            conocidos = {
+                str(f["sku_clave"]) for f in
+                con.execute(f"SELECT DISTINCT sku_clave FROM {sv.TABLA}").fetchall()
+            }
+    except Exception:
+        conocidos = set()
+
+    # 1) Los AIs que suelen traer el codigo de producto
+    for ai, valor in gs1.sku_candidatos(codigo):
+        if ai != "crudo" and ai != "post-sscc":
+            if clave_sku(valor) in conocidos:
+                return {"sku": valor, "origen": "stock",
+                        "candidatos": [{"ai": a, "valor": v}
+                                       for a, v in gs1.sku_candidatos(codigo)]}
+
+    # 2) Cualquier numero del codigo que EXISTA en el stock.
+    #    Se recorren las sub-secuencias de mayor a menor largo, para preferir el
+    #    SKU completo antes que un pedazo.
+    numeros: set[str] = set()
+    for corrida in re.findall(r"\d{4,}", crudo):
+        for i in range(len(corrida)):
+            for j in range(i + 4, min(len(corrida), i + 15) + 1):
+                numeros.add(corrida[i:j])
+    for num in sorted(numeros, key=len, reverse=True):
+        if clave_sku(num) in conocidos:
+            return {"sku": num, "origen": "stock",
+                    "candidatos": [{"ai": "texto", "valor": num}]}
+
+    # 3) Ninguno calza: se devuelve el mas probable del parseo, con aviso
+    cands = gs1.sku_candidatos(codigo)
+    if cands:
+        return {"sku": cands[0][1], "origen": "codigo",
+                "candidatos": [{"ai": a, "valor": v} for a, v in cands],
+                "aviso": "el SKU del codigo no esta en el stock cargado"}
+    return {"sku": "", "origen": "", "candidatos": []}
 
 
 @dataclass

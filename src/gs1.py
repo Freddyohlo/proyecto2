@@ -248,76 +248,132 @@ def _leer_ai(texto: str, i: int, estricto: bool = False) -> tuple[str, int] | No
     return None
 
 
+def _interpretaciones(texto: str, i: int, tope: int = 12) -> list[list[tuple[str, str]]]:
+    """Todas las formas validas de parsear el texto desde i hasta el final.
+
+    Un codigo GS1 sin separadores es ambiguo (no se sabe donde corta un valor
+    variable). En vez de quedarse con la primera lectura, se devuelven todas y
+    quien llama elige la mejor por puntaje. `tope` limita la recursion.
+    """
+    if i >= len(texto):
+        return [[]]
+
+    while i < len(texto) and texto[i] == "\x1d":
+        i += 1
+    if i >= len(texto):
+        return [[]]
+
+    if tope <= 0:
+        return []
+
+    leido = _leer_ai(texto, i, estricto=bool(i))
+    if leido is None:
+        return []
+
+    ai, largo_ai = leido
+    i += largo_ai
+    resultados: list[list[tuple[str, str]]] = []
+
+    # AI de 4 digitos (pesos/medidas): 6 de valor, sin ambiguedad
+    if len(ai) == 4:
+        valor = texto[i:i + 6]
+        for resto in _interpretaciones(texto, i + 6, tope - 1):
+            resultados.append([(ai, valor)] + resto)
+        return resultados
+
+    # AI de longitud fija: sin ambiguedad
+    if ai in AI_FIJOS:
+        n = AI_FIJOS[ai]
+        valor = texto[i:i + n]
+        for resto in _interpretaciones(texto, i + n, tope - 1):
+            resultados.append([(ai, valor)] + resto)
+        return resultados
+
+    # AI variable: probar cada posible fin
+    sep = texto.find("\x1d", i)
+    if sep != -1:
+        valor = texto[i:sep]
+        for resto in _interpretaciones(texto, sep + 1, tope - 1):
+            resultados.append([(ai, valor)] + resto)
+        return resultados
+
+    # Sin separador: todos los cortes posibles (de 1 caracter en adelante)
+    for fin in range(i + 1, len(texto) + 1):
+        valor = texto[i:fin]
+        for resto in _interpretaciones(texto, fin, tope - 1):
+            resultados.append([(ai, valor)] + resto)
+    return resultados
+
+
+def _puntaje(pares: list[tuple[str, str]]) -> int:
+    """Que tan creible es una interpretacion del codigo.
+
+    Se premia lo que sabemos que trae una tarja de bodega (SSCC valido, fechas,
+    cantidad) y se castigan valores absurdamente largos en AIs variables.
+    """
+    p = 0
+    for ai, valor in pares:
+        p += 10                                    # cada AI reconocido suma
+        if ai == "00" and sscc_valido(valor):
+            p += 30                                # SSCC con digito de control OK
+        elif ai == "00":
+            p -= 20                                # un SSCC invalido es sospechoso
+        if ai in ("17", "15", "16") and _fecha_gs1(valor):
+            p += 10                                # vencimiento interpretable
+        if ai in ("11", "13") and _fecha_gs1(valor):
+            p += 5
+        if ai in ("30", "37") and valor.isdigit() and 0 < int(valor) < 100000:
+            p += 10                                # cantidad razonable
+        if ai in ("30", "37", "10", "21", "240", "241") and len(valor) > 14:
+            p -= 10                                # valor demasiado largo
+        if ai in ("90", "91", "92", "93", "94", "95", "96", "97", "98", "99"):
+            p += 8                                 # los internos suelen traer el SKU
+    return p
+
+
+def sscc_valido(sscc: str) -> bool:
+    """True si el SSCC tiene 18 digitos y su digito de control es correcto."""
+    if not sscc or len(sscc) != 18 or not sscc.isdigit():
+        return False
+    suma = 0
+    for i, d in enumerate(reversed(sscc[:-1])):
+        suma += int(d) * (3 if i % 2 == 0 else 1)
+    return (10 - (suma % 10)) % 10 == int(sscc[-1])
+
+
 def parsear(codigo: str) -> EscaneoGS1:
     """Parsea un codigo GS1-128 y devuelve los datos reconocidos.
 
-    Tolera que el lector NO mande separadores (FNC1): en ese caso los AIs de
-    longitud fija se leen por su largo, y los variables cortan al encontrar el
-    siguiente AI valido de `AI_CORTE`.
-
-    Si el codigo es un SSCC pelado (18 digitos, sin AI), se reconoce igual y se
-    devuelve como si viniera de AI 00. Asi la tarja vieja sigue funcionando.
+    Tolera:
+      - Que el lector NO mande el separador FNC1 (se resuelve por puntaje entre
+        todas las lecturas posibles).
+      - AIs con parentesis: "(00)278043...(17)270604".
+      - Prefijo de simbologia (]C1).
+      - Un SSCC pelado de 18 digitos (la tarja "de un solo dato").
     """
     texto = _limpiar(codigo)
     res = EscaneoGS1(crudo=str(codigo or ""))
     if not texto:
         return res
 
-    # Caso especial: SSCC pelado (18 digitos). Es la tarja "de un solo dato".
+    # Caso especial: SSCC pelado (18 digitos).
     if texto.isdigit() and len(texto) == 18:
         res.valores["00"] = texto
         return res
 
-    # Normaliza: los separadores se marcan para saber donde cortan los variables
     for sep in SEPARADORES:
         texto = texto.replace(sep, "\x1d")
 
-    i = 0
-    while i < len(texto):
-        if texto[i] == "\x1d":       # separador suelto
-            i += 1
-            continue
+    lecturas = _interpretaciones(texto, 0)
+    if not lecturas:
+        res.no_reconocidos.append(texto.strip("\x1d").strip())
+        return res
 
-        # Al principio se acepta cualquier AI conocido; despues, solo los que
-        # pueden iniciar un dato (para no cortar un valor numerico en pedazos).
-        leido = _leer_ai(texto, i, estricto=bool(res.valores))
-        if leido is None:
-            resto = texto[i:].strip("\x1d").strip()
-            if resto:
-                res.no_reconocidos.append(resto)
-            break
+    # La mejor lectura: la de mayor puntaje. A igual puntaje, la que trae mas AIs.
+    mejor = max(lecturas, key=lambda p: (_puntaje(p), len(p)))
 
-        ai, largo_ai = leido
-        i += largo_ai
-
-        # --- AI de 4 digitos (pesos/medidas): 6 de valor ---
-        if len(ai) == 4:
-            valor = texto[i:i + 6]
-            i += 6
-            res.valores[ai] = valor
-            continue
-
-        # --- AI de longitud FIJA ---
-        if ai in AI_FIJOS:
-            n = AI_FIJOS[ai]
-            res.valores[ai] = texto[i:i + n]
-            i += n
-            continue
-
-        # --- AI de longitud VARIABLE ---
-        fin = texto.find("\x1d", i)
-        if fin == -1:
-            # Sin separador: cortar cuando empiece el siguiente AI valido
-            fin = len(texto)
-            j = i
-            while j < len(texto):
-                if _leer_ai(texto, j, estricto=True) is not None:
-                    fin = j
-                    break
-                j += 1
-        res.valores[ai] = texto[i:fin]
-        i = fin + 1 if fin < len(texto) and texto[fin:fin + 1] == "\x1d" else fin
-
+    for ai, valor in mejor:
+        res.valores[ai] = valor
     return res
 
 
@@ -332,3 +388,115 @@ def es_gs1(codigo: str) -> bool:
     if any(sep in texto for sep in SEPARADORES):
         return True
     return _leer_ai(texto, 0) is not None and len(texto) > 18
+
+
+# ---------------------------------------------------------------------------
+# SKU dentro del codigo
+# ---------------------------------------------------------------------------
+
+# AIs donde puede venir el SKU (codigo de producto), en orden de probabilidad.
+# El GTIN (01/02) NO esta: ese es el codigo global del producto, no el SKU de
+# la bodega, y confundirlos seria un error.
+AI_SKU = ("240", "241", "90", "91", "92", "93", "94", "95", "96", "97", "98", "99")
+
+
+def ubicar_sscc(codigo: str) -> tuple[int, str]:
+    """Busca un SSCC VALIDO dentro del texto. Devuelve (posicion, sscc) o (-1, "").
+
+    El SSCC tiene digito de control, asi que se puede reconocer sin saber el
+    formato del resto: se prueban las ventanas de 18 digitos y se queda con la
+    que pase el control. Eso sirve de ANCLA para saber donde empiezan los demas
+    datos.
+    """
+    texto = _limpiar(codigo)
+    for i in range(0, max(1, len(texto) - 17)):
+        ventana = texto[i:i + 18]
+        if ventana.isdigit() and sscc_valido(ventana):
+            return i, ventana
+    return -1, ""
+
+
+def sku_candidatos(codigo: str) -> list[tuple[str, str]]:
+    """Devuelve los (ai, valor) que PODRIAN ser el SKU, del mas probable al menos.
+
+    Como NO sabemos en que AI viene el SKU, se combinan tres fuentes:
+      1. Los AIs pensados para el codigo de producto (240, 241, 90-99).
+      2. Los numeros que aparecen DESPUES del SSCC (el SSCC es el ancla: lo que
+         viene despues son los demas datos de la tarja).
+      3. Como ultimo recurso, los numeros del texto completo.
+
+    Quien llama debe cruzar estos candidatos contra el stock
+    (`recepcion.identificar_sku`): el que existe es el SKU.
+
+    El GTIN (01/02) y el SSCC (00) se excluyen: NO son el SKU de bodega.
+    """
+    import re
+
+    e = parsear(codigo)
+    candidatos: list[tuple[str, str]] = []
+    vistos: set[str] = set()
+
+    def agregar(ai: str, valor: str) -> None:
+        v = str(valor).strip()
+        if not v or v in vistos:
+            return
+        vistos.add(v)
+        candidatos.append((ai, v))
+
+    # Valores que YA sabemos que no son el SKU
+    no_sku = {e.sscc, e.gtin}
+    for ai in ("11", "12", "13", "15", "16", "17", "30", "37"):
+        if e.valores.get(ai):
+            no_sku.add(e.valores[ai])
+
+    # 1) AIs que suelen traer el codigo de producto
+    for ai in AI_SKU:
+        v = e.valores.get(ai, "").strip()
+        if v:
+            agregar(ai, v)
+
+    crudo = _limpiar(codigo)
+
+    # 2) Numeros DESPUES del SSCC (el ancla)
+    pos, sscc = ubicar_sscc(crudo)
+    if pos >= 0:
+        no_sku.add(sscc)
+        resto = crudo[pos + 18:]
+        for run in sorted(re.findall(r"\d{4,14}", resto), key=len, reverse=True):
+            if run not in no_sku:
+                agregar("post-sscc", run)
+
+    # 3) Ultimo recurso: numeros del texto completo
+    if not candidatos:
+        for run in sorted(re.findall(r"\d{4,14}", crudo), key=len, reverse=True):
+            if run not in no_sku:
+                agregar("crudo", run)
+
+    return candidatos
+
+
+def describir(codigo: str) -> list[dict]:
+    """Desglose legible del codigo: que trae cada AI.
+
+    Sirve para la pantalla de diagnostico: asi se ve, sin adivinar, que datos
+    manda la tarja realmente.
+    """
+    e = parsear(codigo)
+    salida = []
+    for ai, valor in e.valores.items():
+        salida.append({
+            "ai": ai,
+            "nombre": NOMBRES.get(ai, f"AI {ai}"),
+            "valor": valor,
+            "interpretado": _interpretar(ai, valor),
+        })
+    return salida
+
+
+def _interpretar(ai: str, valor: str) -> str:
+    """Version legible de un valor segun su AI (fechas, etc.)."""
+    if ai in ("11", "12", "13", "15", "16", "17"):
+        return _fecha_gs1(valor)
+    if ai == "30" or ai == "37":
+        return f"{valor} unidades" if valor.isdigit() else valor
+    return ""
