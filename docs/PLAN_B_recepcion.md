@@ -116,9 +116,77 @@ contra el tránsito convertiría una ayuda en un obstáculo justo en contingenci
 
 ---
 
+## 4b. ✅ EL CÓDIGO DE BARRAS TRAE TODOS LOS DATOS (GS1-128)
+
+**Confirmado por el usuario:** al escanear el código de barras de la tarja,
+**los demás datos se llenan solos**.
+
+La tarja usa **GS1-128**, el estándar mundial de logística. El código no trae solo
+el LPN: trae **varios datos juntos**, cada uno marcado con un *Application
+Identifier* (AI).
+
+### Cómo viene el código
+
+```
+(00)278043001201264701  → el pallet (SSCC)
+(17)270604              → vencimiento 04/06/2027
+(11)261031              → elaboración 31/10/2026
+(30)198                 → 198 cajas
+```
+
+El lector lo entrega como **un solo texto**; el sistema lo reparte solo.
+
+### Los AIs que usamos
+
+| AI | Qué es | En la tarja |
+|---|---|---|
+| `00` | SSCC (el pallet) | ✅ |
+| `01` / `02` | GTIN (el producto) | si viene |
+| `10` | Lote | si viene |
+| `11` | Elaboración (YYMMDD) | ✅ |
+| `13` | Empaque | si viene |
+| `17` | **Vencimiento** (YYMMDD) | ✅ |
+| `30` / `37` | Cantidad de cajas | ✅ |
+
+### Reglas GS1 que hay que respetar
+
+- **Fechas en `YYMMDD`**: `270604` = 04/06/2027. El año usa pivote: `YY < 70` → `20YY`.
+- **Día `00` = último día del mes**: `270600` = 30/06/2027.
+- **AIs variables** terminan en separador (FNC1). Muchos lectores **no lo mandan**,
+  así que hay que cortar por el siguiente AI válido.
+
+### ⚠️ Bug real encontrado al implementar
+Al cortar los AIs variables sin separador, el valor `198` se partía en `1` + AI `98`
+(los internos `90-99`), así que **la cantidad salía 1 en vez de 198**.
+Corregido: los AIs internos `90-99` **no** se usan como corte.
+
+### Resultado en pantalla
+
+```
+Antes:  escanear LPN + digitar SKU + cantidad + vencimiento + elaboración + ubicación
+Ahora:  escanear la tarja  →  el sistema llena cantidad, vencimiento y elaboración
+                             el operario solo pone SKU y ubicación
+```
+
+Con `recibir_y_ubicar()`, si la ubicación viene en la tarja, es **un solo toque**.
+
+### Módulo
+`src/gs1.py` — `parsear()` (tolera con/sin paréntesis, con/sin separador, y el
+SSCC pelado de las tarjas viejas), `_fecha_gs1()`, `es_gs1()`.
+
+> **Pendiente de confirmar con un escaneo real:** el orden exacto de los AIs y si
+> CCU incluye el SKU dentro del código (probablemente en un AI interno `90-99` o
+> en `240`). Con el texto crudo de un escaneo real se ajusta en minutos.
+
+---
+
 ## 5. Optimizaciones propuestas (para hacerlo práctico)
 
 ### ✅ Ya implementadas
+
+**0. Leer el código GS1-128 (LA MÁS GRANDE)** ✅ *implementada*
+El código de barras de la tarja trae cantidad, vencimiento y elaboración. El
+sistema los lee y **llena los campos solo**. Es la diferencia entre 6 toques y 2.
 
 **1. Recibir + ubicar en un solo paso**
 La tarja ya trae la ubicación (`C16-01-01-01`). Hacer que el operario confirme dos

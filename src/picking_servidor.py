@@ -133,8 +133,9 @@ PAGINA_RECEPCION = """<!doctype html>
 <div id="msg">Escanee el LPN de la tarja.</div>
 
 <div class="tarjeta">
-  <div class="etq">LPN (tarja)</div>
+  <div class="etq">Escanee el codigo de barras de la tarja</div>
   <input id="lpn" autocomplete="off" autofocus placeholder="escaneando...">
+  <div id="trajo" class="oculto" style="margin-top:8px;font-size:15px;color:#4ade80;"></div>
 
   <div id="resto" class="oculto" style="margin-top:12px;">
     <div class="etq">SKU</div>
@@ -199,25 +200,48 @@ let idSeleccion = null;
 
 function aviso(t, c) { msg.className = c || ''; msg.textContent = t; }
 
-// Paso 1: escanear el LPN
-lpn.addEventListener('change', () => {
-  if (!lpn.value.trim()) return;
+// Paso 1: escanear la tarja. El codigo GS1-128 trae los datos y se llenan solos.
+lpn.addEventListener('change', async () => {
+  const v = lpn.value.trim();
+  if (!v) return;
   $('resto').classList.remove('oculto');
-  aviso('LPN ' + lpn.value.trim() + '. Complete SKU, cantidad y vencimiento.', '');
-  sku.focus();
+
+  const r = await fetch('/api/recepcion/escanear?codigo=' + encodeURIComponent(v));
+  const j = await r.json();
+  const g = (j.gs1 || {});
+
+  let llenos = [];
+  if (g.cantidad) { cant.value = g.cantidad; llenos.push('cantidad ' + g.cantidad); }
+  if (g.fecha_vencimiento) { venc.value = g.fecha_vencimiento; llenos.push('vence ' + g.fecha_vencimiento); }
+  if (g.fecha_elaboracion) { elab.value = g.fecha_elaboracion; llenos.push('elab ' + g.fecha_elaboracion); }
+  if (g.lote) { llenos.push('lote ' + g.lote); }
+
+  if (llenos.length) {
+    $('trajo').textContent = '✅ El codigo trajo: ' + llenos.join(' | ');
+    $('trajo').classList.remove('oculto');
+    aviso('Complete el SKU y la ubicacion, y confirme.', 'ok');
+  } else {
+    $('trajo').classList.add('oculto');
+    aviso('El codigo no trajo mas datos. Complete a mano.', 'aviso');
+  }
+  // Si ya estan todos los datos, se puede recibir y ubicar directo
+  actualizarBotones();
+  (sku.value ? ubic : sku).focus();
 });
 
 // Habilita RECIBIR cuando estan los datos minimos
+function actualizarBotones() {
+  const listo = lpn.value.trim() && sku.value.trim() && parseInt(cant.value || '0') > 0;
+  btn.disabled = !listo;
+  btnRU.disabled = !(listo && ubic.value.trim());   // el paso unico necesita ubicacion
+}
 ['input','change'].forEach(ev => {
-  [sku, cant, ubic].forEach(el => el.addEventListener(ev, () => {
-    const listo = lpn.value.trim() && sku.value.trim() && parseInt(cant.value || '0') > 0;
-    btn.disabled = !listo;
-    btnRU.disabled = !(listo && ubic.value.trim());   // el paso unico necesita ubicacion
-  }));
+  [sku, cant, ubic, lpn].forEach(el => el.addEventListener(ev, actualizarBotones));
 });
 
 function cuerpoRecepcion() {
   return {
+    escaneo: lpn.value.trim(),      // el codigo crudo: el servidor lo parsea
     lpn: lpn.value.trim(), sku: sku.value.trim(),
     cantidad: parseInt(cant.value || '0', 10),
     elaboracion: elab.value.trim(), vencimiento: venc.value.trim(),
@@ -602,6 +626,14 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA_RECEPCION)
             return
 
+        if u.path == "/api/recepcion/escanear":
+            from . import gs1
+            codigo = qs.get("codigo", [""])[0]
+            e = gs1.parsear(codigo)
+            self._json({"ok": True, "gs1": e.resumen(),
+                        "es_gs1": gs1.es_gs1(codigo)})
+            return
+
         if u.path == "/api/recepcion/pendientes":
             from . import recepcion as rc
             pend = rc.pendientes(self.db)
@@ -655,6 +687,36 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/api/recepcion/recibir", "/api/recepcion/recibir-y-ubicar"):
             from . import recepcion as rc
             datos = self._cuerpo()
+            escaneo = str(datos.get("escaneo", "")).strip()
+            if escaneo:
+                # El codigo de barras de la tarja trae los datos: se llenan solos.
+                recep = rc.desde_escaneo(
+                    escaneo,
+                    sku=str(datos.get("sku", "")).strip(),
+                    cantidad=int(datos.get("cantidad", 0) or 0),
+                    ubicacion=str(datos.get("ubicacion", "")).strip(),
+                    almacen=str(datos.get("almacen", "")).strip(),
+                    descripcion=str(datos.get("descripcion", "")).strip(),
+                    usuario=str(datos.get("usuario", "")).strip(),
+                )
+                # Si el codigo no traia cantidad, y tampoco la pantalla: no hay.
+                if not recep.cantidad:
+                    self._json({"ok": False,
+                                "error": "el codigo no trae cantidad y no se digito"},
+                               400)
+                    return
+                if u.path.endswith("recibir-y-ubicar"):
+                    r = rc.recibir_y_ubicar(
+                        self.db, recep,
+                        str(datos.get("ubicacion_final", "")).strip())
+                else:
+                    r = rc.recibir(self.db, recep)
+                if not r["ok"]:
+                    self._json({"ok": False, "error": r["error"]}, r.get("code", 400))
+                    return
+                self._json({**r, "desde_escaneo": True})
+                return
+
             recep = rc.Recepcion(
                 lpn=str(datos.get("lpn", "")).strip(),
                 sku=str(datos.get("sku", "")).strip(),

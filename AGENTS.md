@@ -454,6 +454,16 @@ Mitigaciones implementadas:
     y despues se cuadra (criterio del usuario).
 - `recibir_y_ubicar()` — optimizacion: si la tarja ya trae la ubicacion, se recibe
   y se ubica en UN paso (boton "RECIBIR Y UBICAR").
+- 🎯 **GS1-128 CONFIRMADO**: el codigo de barras de la tarja trae TODOS los datos
+  (el usuario confirmo que al escanearlos se llenan solos). `src/gs1.py` parsea
+  los Application Identifiers: 00=SSCC, 17=vencimiento, 11=elaboracion, 30=cantidad,
+  10=lote, 01=GTIN. Fechas en YYMMDD (pivote YY<70 -> 20YY; dia 00 = ultimo del mes).
+  `recepcion.desde_escaneo()` arma la recepcion desde el escaneo. La pantalla
+  prellena cantidad, vencimiento y elaboracion con un solo escaneo.
+  - BUG encontrado: al cortar los AIs variables sin separador, "198" se partia en
+    "1"+AI(98) y la cantidad salia 1. Los AIs internos 90-99 NO se usan como corte.
+  - PENDIENTE: confirmar con un escaneo REAL el orden de los AIs y si el SKU viene
+    dentro del codigo (probablemente AI interno 90-99 o 240).
 - Portada con menu en `/` (Pickear / Recibir / Ver estado); picking en `/picking`.
 - `src/recepcion.py` — `recibir()` (idempotente por LPN), `ubicar()` (conserva
   lote y vencimiento), `sugerir_ubicacion()`, `pendientes()`, `resumen()`.
@@ -484,9 +494,9 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **107 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **125 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (18).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

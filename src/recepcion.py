@@ -95,6 +95,36 @@ def sscc_valido(sscc: str) -> bool:
     return esperado is not None and esperado == int(sscc[-1])
 
 
+def desde_escaneo(codigo: str, sku: str = "", cantidad: int = 0,
+                  ubicacion: str = "", almacen: str = "",
+                  descripcion: str = "", usuario: str = "",
+                  fecha: str = "") -> Recepcion:
+    """Arma una Recepcion a partir del codigo de barras GS1-128 de la tarja.
+
+    El escaneo llena solo: SSCC, vencimiento, elaboracion, cantidad y lote.
+    Lo que NO viene en el codigo (SKU, ubicacion, almacen, descripcion) se toma
+    de los parametros, que pueden venir de la pantalla o quedar vacios para que
+    el operario los complete.
+
+    Si el escaneo no trae cantidad, se usa la que venga por parametro.
+    """
+    from . import gs1
+
+    e = gs1.parsear(codigo)
+    return Recepcion(
+        lpn=e.sscc or str(codigo or "").strip(),
+        sku=sku,
+        cantidad=e.cantidad or cantidad,
+        ubicacion=ubicacion,
+        almacen=almacen,
+        descripcion=descripcion,
+        fecha_elaboracion=e.fecha_elaboracion,
+        fecha_vencimiento=e.fecha_vencimiento,
+        usuario=usuario,
+        fecha=fecha,
+    )
+
+
 @dataclass
 class Recepcion:
     lpn: str
