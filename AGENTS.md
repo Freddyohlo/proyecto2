@@ -284,6 +284,7 @@ python -m src.plan_b_main informe
 | 2 Picking FEFO | 🟡 falta: asignación FEFO (la venta/TRUCK ya está) |
 | 4 Reincorporación al sistema | ⏳ falta: cómo se reingresan los datos |
 | 6 Contraste venta vs stock vs tránsito | ✅ implementado (`src/contraste.py`) |
+| 7 Picking en terminales RF Zebra | 🟡 prototipo web funcionando (`src/picking_servidor.py`) |
 
 ---
 
@@ -410,6 +411,16 @@ Mitigaciones implementadas:
 
 ## 10. Herramientas del repo (rama `tools-inspeccion-detalle`)
 
+### Terminales RF (Zebra Android) — picking de contingencia
+- `docs/PLAN_B_dispositivos_RF.md` — análisis de arquitectura (opciones web vs
+  Velocity/telnet, riesgos, plan).
+- `src/picking_servidor.py` — prototipo de servidor web de picking:
+  `python -m src.picking_servidor --puerto 8080 --db data/plan_b.sqlite`
+  Flujo: escanear QR de ubicación → escanear SKU/LPN → cantidad → confirmar.
+  FEFO visible. Guarda cada movimiento en la tabla `picking` (para reingreso a BY).
+  `parsear_ubicacion()` acepta el QR en varios formatos ("60-001", "LOC:60-001",
+  URL con ?loc=, "valor|campo").
+
 ### Inspección / exploración de pantallas
 - `tools/inspeccionar_ui.py` — lista los `auto_id` de la ventana (calibración UI)
 - `tools/probar_captura.py` — login + copia de la grilla (sin correo)
@@ -431,11 +442,13 @@ Mitigaciones implementadas:
 
 ## 11. Estado del prototipo
 
-- **48 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
-  `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11 nuevos).
+- **63 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+  `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
+  `test_picking_servidor.py` (15).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).
+- Probado el **servidor de picking** con los 3 formatos de QR de ubicación ✅.
 - Cómo probar sin la app (aquí / Linux):
 ```bash
 python -m src.main --desde-archivo data/muestra.tsv --sin-correo   # dashboard

@@ -85,6 +85,36 @@ def test_a_fecha_tolera_basura():
 
 
 # --------------------------------------------------------------------------
+# Parser del QR de ubicacion (los racks tienen QR; no sabemos el formato exacto)
+# --------------------------------------------------------------------------
+
+def test_parsear_ubicacion_codigo_pelado():
+    assert ps.parsear_ubicacion("60-001") == "60-001"
+    assert ps.parsear_ubicacion("  60-001  ") == "60-001"
+
+
+def test_parsear_ubicacion_con_prefijo():
+    assert ps.parsear_ubicacion("LOC:60-001") == "60-001"
+    assert ps.parsear_ubicacion("UBIC:60-001") == "60-001"
+    assert ps.parsear_ubicacion("ubicacion: 60-001") == "60-001"
+    assert ps.parsear_ubicacion("STOLOC:60-001") == "60-001"
+
+
+def test_parsear_ubicacion_desde_url():
+    assert ps.parsear_ubicacion("https://wms.local/ub?loc=60-001") == "60-001"
+    assert ps.parsear_ubicacion("http://host/x?ubicacion=60-001&otro=1") == "60-001"
+
+
+def test_parsear_ubicacion_pipe():
+    assert ps.parsear_ubicacion("60-001|AREA PICKING|PT01") == "60-001"
+
+
+def test_parsear_ubicacion_no_reconocida_devuelve_tal_cual():
+    assert ps.parsear_ubicacion("ALGO-RARO") == "ALGO-RARO"
+    assert ps.parsear_ubicacion("") == ""
+
+
+# --------------------------------------------------------------------------
 # Persistencia de movimientos
 # --------------------------------------------------------------------------
 

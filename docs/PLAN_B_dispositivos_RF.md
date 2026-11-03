@@ -1,224 +1,195 @@
-# Plan B — Uso de los terminales RF Zebra (Android) para pickear
+# Plan B — Terminales RF Zebra (Android) para pickear
 
-> Análisis de arquitectura previo a implementar. Fecha: 2026-11-03.
-> Pregunta del usuario: ¿podemos usar los TRF Zebra (Android) que hoy hacen el
-> picking para pickear contra nuestro sistema de contingencia? ¿Conviene una APK?
-
----
-
-## 1. Respuesta corta
-
-**Sí, es viable, y es una buena idea.** Pero conviene separar dos cosas que se
-confunden fácil:
-
-| Capa | Pregunta | Respuesta |
-|------|----------|-----------|
-| **Dispositivo** | ¿Podemos usar los Zebra? | ✅ **Sí.** Son Android y traen DataWedge de fábrica. |
-| **Sistema** | ¿Sirve el camino actual (RF contra Blue Yonder)? | ❌ **No.** Si BY está caído, su servidor RF también. |
-
-O sea: durante la contingencia los Zebra son **hardware disponible sin servidor**.
-La oportunidad es **apuntarlos a nuestro servidor** en vez del de BY.
-
-**Y la recomendación importante: NO hace falta una APK.** Se resuelve con una
-**aplicación web** (PWA) que corre en el navegador del propio Zebra. Explico por qué.
+> Análisis de arquitectura. Fecha: 2026-11-03 (revisado con datos reales del cliente).
+> Pregunta: ¿podemos usar los TRF Zebra que hoy hacen el picking para pickear
+> contra nuestro sistema de contingencia?
 
 ---
 
-## 2. Lo que confirmé técnicamente
+## 0. Correcciones importantes (datos aportados por el usuario)
 
-### 2.1 Los Zebra Android traen DataWedge de fábrica
-Zebra incluye **DataWedge** en todos sus computadores móviles Android. DataWedge
-captura el escaneo y lo entrega de dos formas:
+Tres supuestos míos estaban **mal** y cambian la recomendación:
 
-- **Keystroke (HID)**: el código escaneado se escribe como si fuera un teclado en
-  el campo que tenga el foco. **No requiere programar nada.**
-- **Intent**: se envía a una app concreta. Útil con *Enterprise Browser* de Zebra.
+| Supuesto mío | Realidad | Impacto |
+|---|---|---|
+| "Cuando cae el sistema quedamos offline" | **NO.** La caída del WMS es **independiente del WiFi**. Hay puntos de acceso cada pocos metros. | ✅ **Simplifica todo**: no hace falta trabajar sin red ni guardar datos en el dispositivo. |
+| "Velocity es un producto de Blue Yonder" | **NO.** Velocity es el **emulador de terminal (telnet) de Wavelink/Ivanti**. | Cambia la arquitectura: es la capa que habla con BY, y **se le puede cambiar el host**. |
+| "Habría que ver si tienen navegador" | **Sí tienen**: Chrome **y** Enterprise Browser. | Habilita la app web sin fricción. |
 
-→ **Consecuencia clave:** una **página web** en el navegador del Zebra recibe los
-escaneos sin escribir una línea de Android. Solo hay que configurar DataWedge una
-vez por dispositivo (perfil → keystroke habilitado).
+### Equipos confirmados
+- **Zebra MC3400** → Android 13 / 14.
+- **Zebra MC330L** (familia MC3300x) → Android 10 / 11 / 13 / 14.
+- Ambos soportan **Chrome** y **Enterprise Browser** (navegador industrial de Zebra,
+  HTML5 + API nativa de escaneo).
+- Ambos corren **Velocity** (emulador telnet) con un menú + login para pickear.
 
-### 2.2 El RF de Blue Yonder es MOCA sobre Telnet/SSH
-El RF de BY no es una app nativa: son **pantallas MOCA** servidas por
-Telnet/SSH, y el dispositivo corre un **emulador de terminal**.
-Existen emuladores Android de terceros (ej. *Smart RF Plus*) que se conectan al
-servidor MOCA/MTF por telnet.
-
-→ **Consecuencia:** los Zebra actuales son **terminales tontos apuntando a BY**.
-Cuando BY cae, no tienen a qué conectarse. **Ese es exactamente el hueco** que
-nuestro Plan B puede llenar: darles un servidor propio.
-
-### 2.3 BY tiene API REST… pero no la podemos usar
-Existe la *Blue Yonder Warehouse Management API* (REST) para inventario y tareas.
-**Pero** el acceso depende del contrato/versión del cliente, y el usuario ya
-confirmó que **en esta instalación no hay API disponible** (se accede por UI
-automation). Por lo tanto **no** es una base sobre la que construir la contingencia.
-
-### 2.4 Sobre "Velocity"
-No pude confirmar un producto de Blue Yonder llamado exactamente "Velocity".
-Lo que sí existe y es el camino móvil de BY: **Orchestrator app**, **Warehouse
-Operator App** y **WES (Warehouse Execution System)**.
-→ **A confirmar con el usuario** qué es "la implementación por velocity" en su
-empresa (¿el layer móvil de BY? ¿un partner? ¿un nombre interno?).
+### Los racks tienen **código QR con la ubicación**
+Es lo que los pickeadores pistolean para ubicarse. → El escaneo de ubicación ya
+existe en la operación; nuestro sistema solo tiene que **leer ese mismo QR**.
 
 ---
 
-## 3. Arquitecturas posibles
+## 1. Cómo funciona hoy (y por qué se cae)
 
-### Opción 0 — Listas en papel (el más barato)
-Generar PDF/Excel de picking desde el Plan B; el picker trabaja en papel; el
-administrador digita el resultado.
+```
+   [Blue Yonder ARRIBA]                       [Blue Yonder CAÍDO]
+        │                                            │
+   Zebra (Velocity, telnet) ──► servidor BY     Zebra (Velocity) ──► ¿? nada
+        │                                            │
+   WiFi: OK (independiente)                    WiFi: SIGUE OK ✅
+```
 
-- ✅ Cero infraestructura, cero riesgo técnico, funciona hoy.
-- ❌ No hay validación de escaneo; errores de transcripción; lento.
-- **Sirve como respaldo del respaldo.** Conviene implementarlo igual.
+**La clave:** el WiFi sigue funcionando. Lo que muere es el **servidor de BY**.
+Los Zebra quedan encendidos, conectados y con navegador — **sin servidor**.
 
-### Opción 1 — App web (PWA) en los Zebra actuales  ⭐ RECOMENDADA
-El PC de contingencia levanta un **servidor web local** en la LAN de la bodega.
-El picker abre el navegador del Zebra → nuestra pantalla de picking → DataWedge
-mete los escaneos como teclado → todo se guarda en SQLite local.
+→ **La oportunidad:** darles **nuestro servidor** durante la caída.
 
-- ✅ **No hay que escribir ni distribuir una APK.**
-- ✅ Se actualiza sola (es web): se cambia en el PC y listo.
-- ✅ Usa los dispositivos que ya están en la operación.
+---
+
+## 2. Dos arquitecturas viables
+
+### Opción A — App WEB en Chrome / Enterprise Browser  ⭐ RECOMENDADA
+
+El PC de contingencia levanta un servidor web en la LAN. El picker abre el
+navegador del Zebra (que ya tiene WiFi) → nuestra pantalla → escanea el QR de la
+ubicación → escanea SKU/LPN → confirma.
+
+```
+   [PC contingencia: servidor web + SQLite]  ◄── WiFi ──  [Zebra: Chrome/EB]
+```
+
+- ✅ **No hay que escribir ni distribuir una APK.** Es HTML/JS.
+- ✅ Se actualiza sola: se cambia en el PC y listo.
 - ✅ Reutiliza el stack que ya tenemos (Python + SQLite + HTML).
-- ❌ Depende de WiFi de la bodega hasta el PC (hay que asegurar cobertura).
-- ❌ La UI debe ser "dedo grande": botones grandes, alto contraste, sin zoom.
-- ❌ Configurar DataWedge una vez por dispositivo.
+- ✅ Con **Enterprise Browser** se puede usar su **API nativa de escaneo**
+  (`EB.Barcode`) en vez del teclado — más robusto. Con Chrome, DataWedge keystroke.
+- ✅ UI táctil moderna y controlada por nosotros.
+- ❌ El picker aprende un flujo nuevo (pero es simple: 3 pasos).
 
-### Opción 2 — APK (Capacitor/Ionic + plugin DataWedge oficial)
-Envolver la misma app web en una APK nativa, usando el plugin oficial de Ionic
-para DataWedge.
+### Opción B — Apuntar **Velocity** a NUESTRO servidor telnet  🎯 SIN REENTRENAMIENTO
 
-- ✅ Se ve/instala como app "de verdad"; control total del escaneo por Intent.
-- ✅ Puede guardar datos en el dispositivo (útil si el WiFi es malo).
-- ❌ Hay que compilar, firmar y **distribuir** la APK en N dispositivos.
-- ❌ Cada cambio = reinstalar en cada Zebra (o MDM).
-- ❌ Más superficie de mantenimiento (Android SDK, versiones, fragmentación).
-- **Solo vale la pena** si se necesita trabajar sin WiFi o desplegar por MDM.
+Velocity es un emulador telnet: se le configura **IP + puerto + tipo de emulación**.
+Se puede crear un **perfil de host alterno** que apunte a **nuestro PC** y servir
+pantallas tipo RF (VT220) desde ahí.
 
-### Opción 3 — Integrarse al RF real de BY
-Usar el MOCA/REST de BY como corresponde.
+- ✅ **Los pickers usan la MISMA app de siempre.** Cero reentrenamiento.
+- ✅ Mismo "look and feel" de terminal al que están acostumbrados.
+- ✅ No hay que instalar nada en los Zebra.
+- ❌ Hay que **programar un servidor telnet** que dibuje pantallas VT220
+  (escape sequences, teclas de función) — más trabajo y más frágil que web.
+- ❌ La UX es de terminal (texto), no táctil.
+- ❌ Cambiar el perfil de host requiere despliegue por IT (Avalanche/MDM).
 
-- ✅ Es la solución "correcta" de largo plazo.
-- ❌ **No sirve para contingencia**: requiere que BY esté arriba.
+### Opción C — Listas en papel (respaldo del respaldo)
+Generar PDF/Excel de picking desde el Plan B; el picker trabaja en papel.
 
----
-
-## 4. Recomendación
-
-1. **Empezar por la Opción 1 (app web)** sobre los Zebra existentes.
-   Es la que da el 90% del valor con el 10% del esfuerzo.
-2. **Dejar la Opción 0 (papel)** implementada como respaldo por si el WiFi falla.
-3. **No ir a APK** salvo que aparezca una necesidad concreta (offline en
-   dispositivo o despliegue por MDM).
-
-### Decisión de arquitectura de fondo: centralizado, NO en el dispositivo
-El sistema debe ser **centralizado**: un solo servidor (el PC del administrador) y
-los Zebra como **clientes**. 
-
-**Por qué:** si cada Zebra guardara su propio stock (APK autocontenida), tendríamos
-N estados de inventario divergentes y habría que sincronizarlos entre sí *y* con
-BY. Eso es un problema mucho más difícil y riesgoso que la caída original. Un solo
-origen de verdad evita ese infierno.
+- ✅ Cero infraestructura, funciona siempre.
+- ❌ Sin validación de escaneo; errores de transcripción; lento.
+- **Conviene tenerlo igual**, por si el PC de contingencia se cae.
 
 ---
 
-## 5. Riesgos y mitigaciones
+## 3. Recomendación
 
-### 5.1 Doble descuento al volver BY  ⚠️ EL MÁS GRAVE
+**Primaria: Opción A (app web).** Es la que da el 90% del valor con el 10% del
+esfuerzo, y ya está prototipada y probada.
+
+**Respaldo: Opción C (papel)** para el peor caso.
+
+**Opción B (telnet) queda como carta fuerte a evaluar** si la adopción de los
+pickers es un problema: es la única que **no les cambia nada**. Vale la pena
+prototiparla barato para medir el esfuerzo real.
+
+> **Sugerencia:** implementar A primero (rápido, visible), y en paralelo evaluar B
+> con un prototipo mínimo. Si B sale simple, es la mejor experiencia para el
+> operario; si no, A ya está resuelto.
+
+### Decisión de fondo: CENTRALIZADO, nunca en el dispositivo
+Un solo servidor (el PC de contingencia), los Zebra como clientes.
+Si cada Zebra guardara su propio stock, tendríamos N inventarios divergentes que
+sincronizar entre sí *y* con BY. Eso es peor que la caída original.
+
+---
+
+## 4. Riesgos y mitigaciones
+
+### 4.1 Doble descuento al volver BY  ⚠️ EL MÁS GRAVE
 Si se pickea offline y BY sigue creyendo que el stock está, al volver el sistema
-alguien podría volver a pickear lo mismo → **doble picking / stock fantasma**.
+alguien podría volver a pickear lo mismo → **stock fantasma**.
 
 **Mitigación:**
-- Registrar **cada** movimiento offline con: SKU, ubicación, LPN/lote, cantidad,
-  usuario, fecha-hora y pedido. Sin eso no se puede reproducir.
+- Registrar **cada** movimiento con SKU, ubicación, LPN/lote, cantidad, usuario y
+  fecha-hora. Sin eso no se puede reingresar.
 - Al volver BY: **congelar** los SKU/ubicaciones tocados, reingresar los
   movimientos y recién entonces liberar.
-- Cuadrar contra un conteo físico de las ubicaciones afectadas antes de liberar.
+- Cuadrar contra conteo físico de las ubicaciones afectadas antes de liberar.
 
-### 5.2 Integridad FEFO
-Offline podríamos elegir un lote que BY no habría elegido (BY puede tener
-retenciones, reservas o bloqueos que nosotros no vemos).
+### 4.2 Integridad FEFO
+Offline podríamos elegir un lote que BY no habría elegido (retenciones, reservas,
+bloqueos que no vemos).
 
-**Mitigación:** capturar siempre LPN/lote en el pick y reingresar el lote exacto,
-no "el que BY habría elegido".
+**Mitigación:** capturar siempre LPN/lote en el pick y reingresar el lote exacto.
 
-### 5.3 Cobertura WiFi y disponibilidad del servidor
-Los Zebra se mueven entre racks; el servidor es un solo PC.
+### 4.3 Dependencia del PC de contingencia
+Ahora todo depende de **una sola máquina**.
 
-**Mitigación:** verificar cobertura en los pasillos críticos, IP fija para el PC,
-y **no** apagar/suspender ese PC (misma regla que el PC del reporte diario).
+**Mitigación:** IP fija, sin suspensión, respaldo del SQLite, y Opción C (papel)
+como red de seguridad.
 
-### 5.4 Configuración de dispositivos
-Hay que configurar DataWedge en cada Zebra.
+### 4.4 El formato del QR de ubicación  ❓ A CONFIRMAR
+Hay que saber **qué contiene** el QR de los racks:
+- ¿El código pelado (`60-001`)?
+- ¿Con prefijo (`LOC:60-001`)?
+- ¿Una URL o JSON?
 
-**Mitigación:** el perfil de DataWedge se puede exportar/importar como archivo de
-configuración y desplegar en bloque (o por MDM si existe).
+**Mitigación:** el parser de ubicación debe ser tolerante (ver `picking_servidor.py`).
 
-### 5.5 Seguridad e identidad
-Cada pick debe quedar a nombre de una persona (para el reingreso y para el
-informe de productividad).
+### 4.5 Política de IT
+Instalar apps o cambiar perfiles en equipos corporativos puede chocar con TI.
 
-**Mitigación:** login simple en la app (usuario/clave o **escaneo de credencial**
-si los carnets tienen código de barras).
-
-### 5.6 Política de IT
-Instalar/configurar apps o usar el navegador en equipos corporativos puede chocar
-con las reglas de TI.
-
-**Mitigación:** validar con TI **antes** de construir. La Opción 1 (web) es la que
-menos fricción tiene justamente por esto.
-
-### 5.7 Dato faltante: los códigos de barra
-Para escanear necesitamos que los códigos existan y sean legibles.
-
-**A verificar:**
-- ¿Las **ubicaciones** tienen etiqueta con código de barras? ¿Qué formato?
-- ¿Los **SKU** tienen código de barras y coincide con `prtnum`?
-- ¿Los **LPN** tienen código de barras (para FEFO/lote)?
+**Mitigación:** validar con TI antes de construir. La Opción A es la de menor
+fricción (no instala nada: es una URL).
 
 ---
 
-## 6. Qué necesito confirmar antes de construir
+## 5. Qué falta confirmar
 
-- [ ] **Modelo exacto** de los Zebra (TC21 / TC52 / TC78 / otro) y versión de Android.
-- [ ] ¿Tienen **navegador** (Chrome) disponible? ¿O solo Enterprise Browser?
-- [ ] ¿Hay **WiFi** en los pasillos de picking y hasta dónde llega?
-- [ ] ¿El PC de contingencia puede tener **IP fija** en esa red?
-- [ ] ¿Qué es **"velocity"** exactamente en su operación?
-- [ ] ¿TI permite una app web / APK en esos equipos?
-- [ ] **Códigos de barras**: ¿ubicación, SKU y LPN los tienen? ¿formato?
-- [ ] ¿Cuántos Zebra hay (para dimensionar la configuración)?
-
----
-
-## 7. Plan de implementación propuesto (por pasos)
-
-1. **Servidor local de picking** (Python, en el PC): sirve la UI web y guarda en
-   SQLite. Reutiliza `inventario.py` y `contraste.py`.
-2. **Pantalla de picking** (HTML táctil): escanear ubicación → escanear SKU/LPN →
-   cantidad → confirmar. Sugerencia FEFO visible.
-3. **Probar en UN Zebra** con DataWedge (keystroke) apuntando al PC.
-4. **Lista de reingreso**: exportar los movimientos offline en un formato claro
-   para reingresar a BY al volver.
-5. **Respaldo en papel** (Opción 0) por si el WiFi falla.
-6. (Opcional, futuro) envolver en APK solo si aparece la necesidad.
-
-> El paso 1–2 se puede construir y probar **sin** los Zebra (navegador normal),
-> igual que hicimos con el informe y el Plan B.
+- [ ] **¿Qué contiene el QR** de la ubicación? (formato exacto)
+- [ ] ¿El QR del rack se puede leer con la cámara o con el láser del Zebra?
+- [ ] ¿El SKU y el LPN **tienen código de barras**? ¿formato?
+- [ ] ¿TI permite una URL/app web en esos equipos?
+- [ ] ¿Cuántos Zebra hay en total (MC3400 / MC330L)?
+- [ ] ¿Los pickeadores están acostumbrados a escanear SKU, o eligen de una lista?
+- [ ] ¿El PC de contingencia puede tener IP fija en la red de la bodega?
+- [ ] ¿Hay algún MDM (Avalanche) para desplegar el perfil de Velocity (Opción B)?
 
 ---
 
-## 8. Fuentes consultadas
+## 6. Plan de implementación
 
-- Zebra — DataWedge (software de captura en dispositivos Android):
+1. **Servidor local de picking** (Python en el PC): sirve la UI y guarda en SQLite.
+   ✅ *Prototipo hecho* (`src/picking_servidor.py`).
+2. **Ajustar al QR real**: parsear el código de ubicación como venga.
+3. **Probar en UN Zebra** (Chrome y Enterprise Browser) apuntando al PC.
+4. **Lista de reingreso** para devolver los movimientos a BY al volver.
+5. **Respaldo en papel** (Opción C).
+6. **Evaluar Opción B** (telnet/Velocity) con un prototipo mínimo.
+
+> Los pasos 1–2 se prueban **sin** los Zebra (navegador normal), igual que hicimos
+> con el informe y el Plan B.
+
+---
+
+## 7. Fuentes
+
+- Wavelink/Ivanti **Velocity** — emulador de terminal (telnet) para Android,
+  se configura con **IP + puerto + tipo de emulación** (host profile):
+  https://help.ivanti.com/wl/help/en_us/velcon/1.2/admin/configuringhostprofiles.htm
+- Zebra **Enterprise Browser** — soporte por dispositivo (incluye MC3400 Android 13/14):
+  https://www.zebra.com/us/en/support-downloads/software/mobile-computer-software/enterprise-browser.html
+- Zebra **DataWedge** — captura de escaneo (keystroke/intent) en Android:
   https://www.zebra.com/us/en/software/mobile-computer-software/datawedge.html
-- Ionic — plugin oficial Zebra DataWedge (para Capacitor/APK):
-  https://ionic.io/docs/zebra-datawedge
 - Smart RF Plus — emulador RF Android para BY (confirma que el RF es MOCA/telnet):
   https://www.smart-is.com/what-we-do/smart-product/rf
-- Blue Yonder — movilidad y automatización:
-  https://blueyonder.com/solutions/mobility-and-automation
 - RFgen — riesgos de operar inventario offline (desincronización con el ERP):
   https://www.rfgen.com/blog/offline-inventory-management-in-warehouses

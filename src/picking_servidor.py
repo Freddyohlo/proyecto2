@@ -98,6 +98,7 @@ PAGINA = """<!doctype html>
 const $ = id => document.getElementById(id);
 const ubic = $('ubicacion'), sku = $('sku'), cant = $('cantidad'), msg = $('msg');
 const btn = $('btnOk');
+let ubicacionReal = '';   // la ubicacion ya parseada (el QR puede traer prefijos)
 
 function aviso(texto, clase) {
   msg.className = clase || '';
@@ -111,14 +112,15 @@ function paso(n, activo) {
 }
 let pasoActual = 1;
 
-// DataWedge escribe el codigo y manda ENTER al final -> usamos 'change'
+// DataWedge / Enterprise Browser escriben el codigo y mandan ENTER -> 'change'
 ubic.addEventListener('change', async () => {
   const v = ubic.value.trim();
   if (!v) return;
   const r = await fetch('/api/ubicacion?codigo=' + encodeURIComponent(v));
   const j = await r.json();
   if (!j.ok) { aviso('Ubicacion no encontrada: ' + v, 'err'); ubic.select(); return; }
-  aviso('Ubicacion ' + v + ' — ' + j.skus + ' SKUs disponibles. Escanee el SKU.', 'ok');
+  ubicacionReal = j.ubicacion;
+  aviso('Ubicacion ' + ubicacionReal + ' — ' + j.skus + ' SKUs disponibles. Escanee el SKU.', 'ok');
   ubic.disabled = true; sku.disabled = false; sku.focus();
   pasoActual = 2; paso(1, false); paso(2, true);
 });
@@ -126,7 +128,7 @@ ubic.addEventListener('change', async () => {
 sku.addEventListener('change', async () => {
   const v = sku.value.trim();
   if (!v) return;
-  const r = await fetch('/api/sku?ubicacion=' + encodeURIComponent(ubic.value.trim()) +
+  const r = await fetch('/api/sku?ubicacion=' + encodeURIComponent(ubicacionReal) +
                         '&codigo=' + encodeURIComponent(v));
   const j = await r.json();
   if (!j.ok) { aviso('SKU/LPN no encontrado en esa ubicacion: ' + v, 'err'); sku.select(); return; }
@@ -138,7 +140,7 @@ sku.addEventListener('change', async () => {
 
 btn.addEventListener('click', async () => {
   const cuerpo = {
-    ubicacion: ubic.value.trim(),
+    ubicacion: ubicacionReal,
     codigo: sku.value.trim(),
     cantidad: parseInt(cant.value || '0', 10),
     usuario: 'RESIDENTE-STG',
@@ -153,7 +155,7 @@ btn.addEventListener('click', async () => {
   aviso('Confirmado: ' + cuerpo.cantidad + ' x ' + j.sku + ' desde ' + cuerpo.ubicacion, 'ok');
   agregarHist(cuerpo, j);
   // reiniciar
-  ubic.value = ''; sku.value = ''; cant.value = 1;
+  ubic.value = ''; sku.value = ''; cant.value = 1; ubicacionReal = '';
   ubic.disabled = false; sku.disabled = true; cant.disabled = true; btn.disabled = true;
   pasoActual = 1; paso(1, true); paso(2, false); paso(3, false);
   ubic.focus();
@@ -196,6 +198,42 @@ def _a_fecha(texto: str):
         except ValueError:
             continue
     return datetime.max
+
+
+def parsear_ubicacion(escaneo: str) -> str:
+    """Extrae el codigo de ubicacion de lo que devuelve el QR del rack.
+
+    El QR puede traer la ubicacion en varios formatos; se acepta cualquiera:
+      "60-001"                          -> "60-001"
+      "LOC:60-001" / "UBIC:60-001"      -> "60-001"
+      "60-001|AREA PICKING"             -> "60-001"
+      "https://host/ub?loc=60-001"      -> "60-001"
+      " 60-001 "                        -> "60-001"
+    Si no se reconoce nada, devuelve el texto tal cual (mejor intentar que fallar).
+    """
+    if not escaneo:
+        return ""
+    texto = str(escaneo).strip()
+
+    # URL con parametro ?loc= / ?ubicacion=
+    if "://" in texto or "?" in texto:
+        from urllib.parse import parse_qs, urlparse
+        consulta = parse_qs(urlparse(texto).query)
+        for clave in ("loc", "ubicacion", "location", "ubic"):
+            if consulta.get(clave):
+                return consulta[clave][0].strip()
+
+    # "PREFIJO:valor" (LOC:, UBIC:, UBICACION:, LOCATION:)
+    if ":" in texto and "://" not in texto:
+        prefijo, _, resto = texto.partition(":")
+        if prefijo.strip().upper() in ("LOC", "UBIC", "UBICACION", "LOCATION", "STOLOC"):
+            return resto.strip()
+
+    # "valor|campo2|campo3" -> el primero
+    if "|" in texto:
+        return texto.split("|")[0].strip()
+
+    return texto
 
 
 def _buscar_sku(con: sqlite3.Connection, ubicacion: str, codigo: str) -> dict | None:
@@ -254,13 +292,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/ubicacion":
-            codigo = qs.get("codigo", [""])[0].strip()
+            crudo = qs.get("codigo", [""])[0]
+            codigo = parsear_ubicacion(crudo)
             with _conectar(self.db) as con:
                 n = con.execute(
                     "SELECT COUNT(DISTINCT sku) FROM stock WHERE ubicacion = ?",
                     (codigo,),
                 ).fetchone()[0]
-            self._json({"ok": n > 0, "skus": n})
+            self._json({"ok": n > 0, "skus": n, "ubicacion": codigo})
             return
 
         if u.path == "/api/sku":
