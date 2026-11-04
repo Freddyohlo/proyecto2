@@ -537,7 +537,14 @@ completar**. Eso ya lo hace el propio destinado de tareas.
   propias tareas (`tarea_pendiente(db, operador)`).
 - El **informe del día incluye el reapro**: tarjeta "Movs. de reapro", tabla de
   movimientos (operador, SKU, de dónde, a dónde, cajas, estado), hoja de Excel y
-  alerta si quedaron reapros sin confirmar. Trabaja contra el **stock vivo** (respeta
+  alerta si quedaron reapros sin confirmar.
+- 🎯 **MOVIMIENTOS DE LA JORNADA** (lo que más le interesa al usuario): el informe
+  destaca el TOTAL de movimientos del día con su desglose por tipo:
+  `ResumenDia.movimientos_totales`, `.cajas_movidas`, `.desglose_movimientos()`.
+  Ej.: "4 movimientos (365 cajas)" = 2 picking + 1 reapro + 1 recepción.
+  - ⚠️ **Bug corregido**: `cajas_pickeadas` leía `stock.pickeado`, pero ese contador
+    del stock vivo **también sube con el reapro** (la grua mueve mercadería), así
+    que sumarlo aparte contaba doble. Ahora se lee de la tabla de movimientos. Trabaja contra el **stock vivo** (respeta
   reservas), no contra la foto.
   - `calcular(db)` → necesidades (stock actual, mínimo, máximo, cuánto reponer,
     cuánto hay en almacén, si alcanza).
@@ -575,9 +582,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **174 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **179 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (27).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

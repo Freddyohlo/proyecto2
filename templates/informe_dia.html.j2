@@ -49,6 +49,12 @@
   {% endfor %}
 
   <div class="cards">
+    <div class="card" style="grid-column: span 2; background:#1e293b; color:#e6edf7;">
+      <div class="lbl" style="color:#93a4bf;">Movimientos de la jornada</div>
+      <div class="val num" style="font-size:34px;">{{ d.movimientos_totales }}
+        <small style="color:#93a4bf;">movimientos · {{ d.cajas_movidas }} cajas</small>
+      </div>
+    </div>
     <div class="card">
       <div class="lbl">Cajas pickeadas</div>
       <div class="val num">{{ stock.pickeado }}</div>
@@ -78,6 +84,24 @@
       <div class="lbl">Recepciones</div>
       <div class="val num">{{ recep.recepciones }}</div>
     </div>
+  </div>
+
+  <div class="panel">
+    <h2>Movimientos de la jornada</h2>
+    <table>
+      <thead><tr><th>Tipo de movimiento</th><th>Movimientos</th><th>Cajas</th></tr></thead>
+      <tbody>
+      {% for m in d.desglose_movimientos() %}
+        <tr><td>{{ m.tipo }}</td><td class="num">{{ m.movimientos }}</td>
+            <td class="num">{{ m.cajas }}</td></tr>
+      {% endfor %}
+        <tr style="font-weight:700;background:#f8fafc;">
+          <td>TOTAL</td>
+          <td class="num">{{ d.movimientos_totales }}</td>
+          <td class="num">{{ d.cajas_movidas }}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 
   <div class="panel">

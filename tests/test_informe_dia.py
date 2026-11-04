@@ -24,7 +24,15 @@ def _fila(area, ubicacion, sku, cantidad, caducidad, lpn="LPN1", desc="PRODUCTO"
 DETALLE = "\n".join([
     _fila("AREA PICKING", "60-001", "000622", 12, "01/12/2026 00:00:00", desc="COLA"),
     _fila("AREA PICKING", "60-002", "007266", 5, "01/01/2027 00:00:00", desc="JUGO"),
+    _fila("AREA ALMACENAMIENTO", "A-01", "000622", 500, "01/06/2027 00:00:00",
+          lpn="LA1", desc="COLA"),
 ]) + "\n"
+
+# Grilla de reabastecimiento (18 columnas): max=col7, min=col8
+FILA_REAB = "\t".join([
+    "CD8000", "000622", "60-001", "ZM PICKING", "Disponible", "Unchecked",
+    "200", "20", "1", "Completo", "", "", "1", "0", "UN", "0", "0", "ZM PICKING",
+])
 
 TARJA_NUEVA = dict(lpn="278043001201264701", sku="700809", cantidad=198,
                    descripcion="GATO DULCE", fecha_vencimiento="04.06.2027",
@@ -36,6 +44,8 @@ def db(tmp_path):
     ruta = tmp_path / "t.sqlite"
     inv.leer_detalle(DETALLE).guardar(ruta)
     sv.inicializar(ruta)
+    from src import minmax as mm
+    mm.leer_reabastecimiento(FILA_REAB).guardar(ruta)
     return str(ruta)
 
 
@@ -281,3 +291,95 @@ def test_cerrar_dia_dos_veces_no_rompe(db):
     assert segunda["ya_cerrado"] is True, "el dia ya estaba cerrado"
     # Y no libera dos veces
     assert sv.resumen(db)["reservado"] == 0
+
+
+# --------------------------------------------------------------------------
+# Movimientos de la jornada (el dato que le interesa al supervisor)
+# --------------------------------------------------------------------------
+
+def test_movimientos_totales_suman_todo(db):
+    """Picks + reapros + recepciones = movimientos de la jornada."""
+    # Un destinado genera las tareas; se confirman TODAS las que salgan
+    # (puede haber varias ubicaciones de picking del mismo SKU).
+    pk.destinar(db, pd.DataFrame([("622", 20)], columns=["sku_clave", "cajas"]))
+    picks = 0
+    while True:
+        t = pk.tarea_pendiente(db)
+        if t is None:
+            break
+        pk.confirmar(db, t["id"], t["cantidad"], "P1")
+        picks += 1
+
+    rc.recibir(db, rc.Recepcion(lpn="111", sku="700809", cantidad=50,
+                                fecha_vencimiento="01/12/2027"))
+
+    d = inf.recopilar(db)
+    assert d.movimientos_totales == picks + 1, "picks + 1 recepcion"
+    assert d.cajas_movidas == 20 + 50
+
+
+def test_movimientos_incluyen_reapro(db):
+    from src import reapro as rp
+    rp.destinar(db, operador="GRUA1")
+
+    # Puede haber mas de una ubicacion de picking del mismo SKU bajo el minimo:
+    # se confirman TODAS las tareas que se generaron.
+    while True:
+        t = rp.tarea_pendiente(db)
+        if t is None:
+            break
+        rp.confirmar(db, t["id"], t["cantidad"], "GRUA1")
+
+    d = inf.recopilar(db)
+    r = rp.resumen(db)
+    # Solo 60-001 tiene minimo cargado -> 1 tarea que repone hasta el maximo (200).
+    assert d.movimientos_totales == r["hechas"] >= 1
+    assert d.cajas_movidas == r["cajas"] == 200
+    assert d.cajas_reapro == 200
+    # No hay picks, asi que las cajas movidas son SOLO del reapro (no se cuenta doble)
+    assert d.cajas_pickeadas == 0
+
+
+def test_desglose_separa_por_tipo(db):
+    """Cada tipo de movimiento se cuenta aparte y la suma da el total."""
+    from src import reapro as rp
+    pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
+    t = pk.tarea_pendiente(db)
+    pk.confirmar(db, t["id"], 10, "P1")
+    rp.destinar(db, operador="GRUA1")
+    while True:
+        tr = rp.tarea_pendiente(db)
+        if tr is None:
+            break
+        rp.confirmar(db, tr["id"], tr["cantidad"], "GRUA1")
+    rc.recibir(db, rc.Recepcion(lpn="111", sku="700809", cantidad=50))
+
+    d = inf.recopilar(db)
+    desglose = {m["tipo"]: m for m in d.desglose_movimientos()}
+    assert desglose["Picking"]["movimientos"] >= 1
+    assert desglose["Picking"]["cajas"] == 10
+    assert desglose["Reaprovisionamiento (grua)"]["movimientos"] >= 1
+    assert desglose["Reaprovisionamiento (grua)"]["cajas"] == 200
+    assert desglose["Recepcion"]["movimientos"] == 1
+    assert desglose["Recepcion"]["cajas"] == 50
+    # La suma de los tipos da el total
+    assert sum(m["movimientos"] for m in d.desglose_movimientos()) == d.movimientos_totales
+
+
+def test_movimientos_sin_nada(db):
+    d = inf.recopilar(db)
+    assert d.movimientos_totales == 0
+    assert d.cajas_movidas == 0
+
+
+def test_el_informe_muestra_los_movimientos(db, tmp_path):
+    pk.destinar(db, pd.DataFrame([("622", 10)], columns=["sku_clave", "cajas"]))
+    t = pk.tarea_pendiente(db)
+    pk.confirmar(db, t["id"], 10, "P1")
+
+    d = inf.recopilar(db)
+    html = inf.generar_html(d, tmp_path / "d.html",
+                            plantilla="templates/informe_dia.html.j2")
+    texto = html.read_text(encoding="utf-8")
+    assert "Movimientos de la jornada" in texto
+    assert "TOTAL" in texto

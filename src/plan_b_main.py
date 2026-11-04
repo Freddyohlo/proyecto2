@@ -308,6 +308,11 @@ def cmd_informe_dia(args) -> int:
     d = informe_dia.recopilar(ruta, fecha)
 
     print(f"Informe del dia {fecha}")
+    print(f"  MOVIMIENTOS     : {d.movimientos_totales}  "
+          f"({d.cajas_movidas} cajas movidas)")
+    print("  Desglose:")
+    for m in d.desglose_movimientos():
+        print(f"    {m['tipo']:32} {m['movimientos']:>4} mov  {m['cajas']:>6} cajas")
     print(f"  Cajas pickeadas : {d.cajas_pickeadas}")
     print(f"  Cajas recibidas : {d.cajas_recibidas}")
     print(f"  Reservado       : {d.stock.get('reservado', 0)}")

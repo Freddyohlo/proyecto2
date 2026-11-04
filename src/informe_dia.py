@@ -41,7 +41,16 @@ class ResumenDia:
 
     @property
     def cajas_pickeadas(self) -> int:
-        return int(self.stock.get("pickeado", 0))
+        """Cajas que salieron por picking.
+
+        Se leen de la TABLA de movimientos, NO de `stock.pickeado`: ese contador
+        del stock vivo tambien sube cuando la grua mueve mercaderia (reapro), asi
+        que sumarlo aparte contaria dos veces.
+        """
+        if self.picking_mov.empty:
+            return 0
+        return int(pd.to_numeric(self.picking_mov["cantidad"],
+                                 errors="coerce").fillna(0).sum())
 
     @property
     def cajas_recibidas(self) -> int:
@@ -51,6 +60,39 @@ class ResumenDia:
     def cajas_reapro(self) -> int:
         """Cajas bajadas de almacenamiento a picking por la grua."""
         return int(self.reapro.get("cajas", 0))
+
+    @property
+    def movimientos_totales(self) -> int:
+        """TODOS los movimientos de la jornada: picks + reapros + recepciones.
+
+        Es el dato que le interesa al supervisor: "durante la jornada hubo N
+        movimientos". Cada tarea de picking confirmada, cada bajada de grua y
+        cada recepcion cuentan como un movimiento.
+        """
+        picks = int(self.tareas.get("ok", {}).get("tareas", 0))
+        picks += int(self.tareas.get("parcial", {}).get("tareas", 0))
+        return picks + int(self.reapro.get("tareas", 0)) + int(
+            self.recepcion.get("recepciones", 0))
+
+    @property
+    def cajas_movidas(self) -> int:
+        """Cajas movidas en total (pickeadas + bajadas + recibidas)."""
+        return self.cajas_pickeadas + self.cajas_reapro + self.cajas_recibidas
+
+    def desglose_movimientos(self) -> list[dict]:
+        """Los movimientos del dia, separados por tipo."""
+        picks = int(self.tareas.get("ok", {}).get("tareas", 0))
+        picks += int(self.tareas.get("parcial", {}).get("tareas", 0))
+        return [
+            {"tipo": "Picking", "movimientos": picks,
+             "cajas": self.cajas_pickeadas},
+            {"tipo": "Reaprovisionamiento (grua)",
+             "movimientos": int(self.reapro.get("tareas", 0)),
+             "cajas": self.cajas_reapro},
+            {"tipo": "Recepcion",
+             "movimientos": int(self.recepcion.get("recepciones", 0)),
+             "cajas": self.cajas_recibidas},
+        ]
 
     def alertas(self) -> list[dict]:
         """Cosas que conviene mirar antes de cerrar el dia."""
@@ -152,6 +194,8 @@ def generar_excel(d: ResumenDia, destino: str | Path) -> Path:
 
     resumen = pd.DataFrame([
         {"concepto": "Fecha", "valor": d.fecha},
+        {"concepto": "MOVIMIENTOS DE LA JORNADA", "valor": d.movimientos_totales},
+        {"concepto": "Cajas movidas (total)", "valor": d.cajas_movidas},
         {"concepto": "Stock total (foto)", "valor": d.stock.get("total", 0)},
         {"concepto": "Reservado", "valor": d.stock.get("reservado", 0)},
         {"concepto": "Pickeado", "valor": d.stock.get("pickeado", 0)},
@@ -165,6 +209,8 @@ def generar_excel(d: ResumenDia, destino: str | Path) -> Path:
 
     with pd.ExcelWriter(destino, engine="openpyxl") as xw:
         resumen.to_excel(xw, sheet_name="Resumen", index=False)
+        pd.DataFrame(d.desglose_movimientos()).to_excel(
+            xw, sheet_name="Movimientos", index=False)
         if not d.tareas:
             pd.DataFrame([{"sin_tareas": True}]).to_excel(xw, sheet_name="Tareas", index=False)
         else:
