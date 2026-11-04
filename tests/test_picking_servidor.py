@@ -90,7 +90,8 @@ def test_portada_es_el_menu(servidor):
     with urllib.request.urlopen(base + "/") as r:
         html = r.read().decode()
     assert r.status == 200
-    assert "PICKEAR" in html and "RECIBIR MERCADERIA" in html
+    assert "Picking" in html and "Recepción de mercadería" in html
+    assert "cola de trabajos" in html
 
 
 def test_pantalla_de_picking_responde(servidor):

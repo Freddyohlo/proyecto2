@@ -567,6 +567,23 @@ completar**. Eso ya lo hace el propio destinado de tareas.
   `stock_vivo.ingresar()`: antes fusionaba por ubicación+lote+SKU sin mirar el
   vencimiento, y la fila quedaba con una fecha sola.
 
+### Interfaz (rediseño, feedback del usuario)
+- **Menú principal sobrio y profesional** (antes: botones de colores). Estilo
+  "de oficina": fondo claro, tarjetas blancas con borde, tipografía del sistema,
+  secciones (Operación / Sistema / Administración) y **2 columnas**. Ya no hay
+  colores llamativos.
+- **"Operaciones de sistema — cola de trabajos"** (`/cola`, antes "Generar
+  informes"): panorama visual del avance de los trabajos, como la pantalla de
+  colas de Blue Yonder. Tarjetas de resumen, barras de avance por tipo de
+  movimiento, cola de picking, cola de reapro y productividad. Se **auto-refresca
+  cada 30 s** (meta refresh).
+- **"Estado del stock"** (`/estado`): tarjetas + tareas + recepción.
+- **"Operarios"** (`/operarios`): asignar nombre y PIN a los usuarios fijos desde
+  la web (antes solo por CLI).
+- **Botón "← Volver al menú"** en todas las pantallas (las del Zebra llevan un
+  botón chico arriba a la derecha; las de escritorio, en la cabecera).
+- Recepción quedó validada por el usuario ("está muy bueno").
+
 ### Operarios fijos, PIN y productividad
 - `src/operarios.py` — **usuarios FIJOS** (no hay registro ni administración):
   `PICK1..PICK4` (picking) y `GRUA1..GRUA2` (grúa). El supervisor les **asigna**

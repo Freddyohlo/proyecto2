@@ -37,81 +37,132 @@ PAGINA_MENU = """<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Contingencia</title>
 <style>
+  :root {
+    --fondo:#f1f5f9; --panel:#ffffff; --borde:#cbd5e1;
+    --texto:#0f172a; --suave:#64748b; --acento:#1e40af;
+  }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px;
-         background: #0b1220; color: #e6edf7; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  p { color: #93a4bf; font-size: 15px; margin: 0 0 20px; }
-  a { display: block; text-decoration: none; color: #fff; border-radius: 16px;
-      padding: 26px 20px; margin-bottom: 14px; font-size: 26px; font-weight: 800; }
-  a small { display: block; font-size: 15px; font-weight: 400; opacity: .85; margin-top: 6px; }
-  .picking { background: #1d4ed8; }
-  .recepcion { background: #15803d; }
-  .estado { background: #334155; font-size: 19px; padding: 18px 20px; }
-  .informe { background: #7c3aed; }
-  .cerrar { background: #b45309; }
-  .reapro { background: #0891b2; }
-  #cajaInforme { background:#334155; border-radius:16px; padding:20px; margin-bottom:14px;
-                 display:none; }
-  #cajaInforme a { display:inline-block; background:#0b1220; padding:12px 16px;
-                   font-size:16px; margin:6px 6px 0 0; border-radius:10px; }
-  #resumen { font-size: 15px; color: #cbd8ea; margin-top: 10px; line-height: 1.7; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+         margin:0; background:var(--fondo); color:var(--texto); }
+  header { background:#ffffff; border-bottom:1px solid var(--borde); padding:18px 24px; }
+  header h1 { margin:0; font-size:20px; font-weight:600; letter-spacing:-.01em; }
+  header p { margin:4px 0 0; font-size:13px; color:var(--suave); }
+  .wrap { max-width:1000px; margin:0 auto; padding:24px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em;
+       color:var(--suave); font-weight:600; margin:0 0 12px; }
+  .grid { display:grid; grid-template-columns:repeat(2, 1fr); gap:14px; }
+  @media (max-width:640px) { .grid { grid-template-columns:1fr; } }
+  a.op { display:block; text-decoration:none; color:var(--texto); background:var(--panel);
+         border:1px solid var(--borde); border-radius:8px; padding:18px 20px;
+         transition:.12s; }
+  a.op:hover { border-color:var(--acento); box-shadow:0 2px 8px rgba(30,64,175,.10); }
+  a.op .t { font-size:16px; font-weight:600; }
+  a.op .d { font-size:13px; color:var(--suave); margin-top:4px; }
+  a.op .ico { float:right; font-size:18px; color:var(--suave); }
+  .seccion { margin-top:26px; }
+  .panel { background:var(--panel); border:1px solid var(--borde); border-radius:8px;
+           padding:18px 20px; }
+  .panel table { width:100%; border-collapse:collapse; font-size:13px; }
+  .panel th, .panel td { text-align:left; padding:7px 8px;
+                         border-bottom:1px solid #e2e8f0; }
+  .panel th { color:var(--suave); font-weight:600; }
+  .panel td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .btn { display:inline-block; margin:12px 8px 0 0; padding:10px 16px; font-size:14px;
+         border-radius:6px; border:1px solid var(--borde); background:#f8fafc;
+         color:var(--texto); text-decoration:none; cursor:pointer; }
+  .btn:hover { background:#e2e8f0; }
+  .alerta { padding:10px 14px; border-radius:6px; font-size:13px; margin-bottom:10px; }
+  .alerta.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .alerta.warn { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
+  .alerta.err { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+  .oculto { display:none; }
+  footer { color:var(--suave); font-size:12px; text-align:center; padding:24px; }
 </style>
 </head>
 <body>
-<h1>Plan B — contingencia</h1>
-<p>Blue Yonder caido. Elija que va a hacer:</p>
 
-<a class="picking" href="/picking">PICKEAR
-  <small>Ir a la ubicacion que le indique y confirmar</small></a>
+<header>
+  <h1>Sistema de contingencia — WMS</h1>
+  <p>Blue Yonder fuera de servicio · operación de bodega</p>
+</header>
 
-<a class="recepcion" href="/recepcion">RECIBIR MERCADERIA
-  <small>Escanear la tarja del pallet que llego</small></a>
+<div class="wrap">
 
-<a class="estado" href="#" onclick="verEstado(); return false;">VER ESTADO
-  <small>Stock, tareas y recepcion del dia</small></a>
+  <div class="seccion">
+    <h2>Operación</h2>
+    <div class="grid">
+      <a class="op" href="/picking">
+        <span class="ico">→</span>
+        <div class="t">Picking</div>
+        <div class="d">Ir a la ubicación indicada y confirmar el retiro</div>
+      </a>
+      <a class="op" href="/recepcion">
+        <span class="ico">→</span>
+        <div class="t">Recepción de mercadería</div>
+        <div class="d">Escanear la tarja del pallet que llegó</div>
+      </a>
+      <a class="op" href="/reapro">
+        <span class="ico">→</span>
+        <div class="t">Reaprovisionamiento</div>
+        <div class="d">Ver qué está bajo el mínimo y bajar de almacén</div>
+      </a>
+      <a class="op" href="/grua">
+        <span class="ico">→</span>
+        <div class="t">Grúa</div>
+        <div class="d">Tareas de bajada asignadas al operador de grúa</div>
+      </a>
+    </div>
+  </div>
 
-<a class="informe" href="#" onclick="generarInforme(); return false;">GENERAR INFORMES
-  <small>Ver el informe del dia (HTML y Excel)</small></a>
+  <div class="seccion">
+    <h2>Sistema</h2>
+    <div class="grid">
+      <a class="op" href="/estado">
+        <span class="ico">→</span>
+        <div class="t">Estado del stock</div>
+        <div class="d">Existencias, reservas y movimientos del día</div>
+      </a>
+      <a class="op" href="/cola">
+        <span class="ico">→</span>
+        <div class="t">Operaciones de sistema — cola de trabajos</div>
+        <div class="d">Panorama del avance de los trabajos</div>
+      </a>
+    </div>
+  </div>
 
-<a class="reapro" href="/reapro">REAPROVISIONAR
-  <small>Ver que esta bajo el minimo y bajar de almacen a picking</small></a>
+  <div class="seccion">
+    <h2>Administración</h2>
+    <div class="grid">
+      <a class="op" href="#" onclick="cerrarDia(); return false;">
+        <span class="ico">→</span>
+        <div class="t">Cerrar el día</div>
+        <div class="d">Libera lo no pickeado y genera el informe de cierre</div>
+      </a>
+      <a class="op" href="/operarios">
+        <span class="ico">→</span>
+        <div class="t">Operarios</div>
+        <div class="d">Asignar los usuarios fijos a los operarios del día</div>
+      </a>
+    </div>
+  </div>
 
-<a class="cerrar" href="#" onclick="cerrarDia(); return false;">CERRAR EL DIA
-  <small>Libera lo no pickeado y genera el informe de cierre</small></a>
+  <div id="cajaInforme" class="seccion oculto">
+    <div class="panel">
+      <div id="avisoInforme" style="font-size:14px;"></div>
+      <div id="enlaces"></div>
+    </div>
+  </div>
 
-<div class="estado" id="cajaEstado" style="display:none;">
-  <div id="resumen"></div>
 </div>
 
-<div id="cajaInforme">
-  <div style="font-size:19px;font-weight:800;margin-bottom:6px;">✅ Informes generados</div>
-  <div id="avisoInforme" style="font-size:15px;color:#cbd8ea;"></div>
-  <div id="enlaces"></div>
-</div>
+<footer>Documento generado por el sistema de contingencia</footer>
 
 <script>
-async function verEstado() {
-  const r = await fetch('/api/estado');
-  const j = await r.json();
-  const s = j.stock || {}, t = j.tareas || {}, rec = j.recepcion || {};
-  $('resumen').innerHTML =
-    '<b>Stock vivo</b><br>' +
-    'Total ' + s.total + ' | reservado ' + s.reservado +
-    ' | pickeado ' + s.pickeado + ' | disponible ' + s.disponible + '<br><br>' +
-    '<b>Tareas</b><br>' +
-    'Pendientes ' + (t.pendiente ? t.pendiente.cajas : 0) + ' cajas | ' +
-    'ok ' + (t.ok ? t.ok.cajas : 0) + ' | parcial ' + (t.parcial ? t.parcial.cajas : 0) + '<br><br>' +
-    '<b>Recepcion</b><br>' +
-    'Recibidas ' + rec.recepciones + ' (' + rec.cajas + ' cajas) | ' +
-    'pendientes de ubicar ' + rec.pendientes + (rec.sin_vencimiento ? ' | ⚠️ ' + rec.sin_vencimiento + ' sin vencimiento' : '');
-  $('cajaEstado').style.display = 'block';
-}
 async function cerrarDia() {
-  if (!confirm('Cerrar el dia? Se liberan las cajas que quedaron sin pickear y ' +
+  if (!confirm('¿Cerrar el día? Se liberan las cajas que quedaron sin pickear y ' +
                'se genera el informe de cierre.')) return;
   const r = await fetch('/api/dia/cerrar', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -119,27 +170,15 @@ async function cerrarDia() {
   });
   const j = await r.json();
   if (!j.ok) { alert('Error: ' + j.error); return; }
-  $('avisoInforme').textContent = 'Dia ' + j.fecha + ' cerrado — ' +
+  document.getElementById('avisoInforme').innerHTML =
+    '<div class="alerta ok">Día ' + j.fecha + ' cerrado — ' +
     j.tareas_cerradas + ' tareas cerradas, ' + j.cajas_liberadas +
-    ' cajas liberadas. ' + j.cajas_pickeadas + ' cajas pickeadas.';
-  $('enlaces').innerHTML =
-    '<a href="' + j.html + '" target="_blank">📄 Informe de cierre (HTML)</a>' +
-    '<a href="' + j.excel + '" target="_blank">📊 Excel</a>';
-  $('cajaInforme').style.display = 'block';
+    ' cajas liberadas, ' + j.cajas_pickeadas + ' cajas pickeadas.</div>';
+  document.getElementById('enlaces').innerHTML =
+    '<a class="btn" href="' + j.html + '" target="_blank">Ver informe (HTML)</a>' +
+    '<a class="btn" href="' + j.excel + '" target="_blank">Descargar Excel</a>';
+  document.getElementById('cajaInforme').classList.remove('oculto');
 }
-
-async function generarInforme() {
-  const r = await fetch('/api/informe/generar', {method: 'POST'});
-  const j = await r.json();
-  if (!j.ok) { alert('Error: ' + j.error); return; }
-  $('avisoInforme').textContent = 'Dia ' + j.fecha + ' — ' +
-    j.cajas_pickeadas + ' cajas pickeadas, ' + j.cajas_recibidas + ' recibidas.';
-  $('enlaces').innerHTML =
-    '<a href="' + j.html + '" target="_blank">📄 Ver informe (HTML)</a>' +
-    '<a href="' + j.excel + '" target="_blank">📊 Excel</a>';
-  $('cajaInforme').style.display = 'block';
-}
-const $ = id => document.getElementById(id);
 </script>
 </body>
 </html>
@@ -154,7 +193,7 @@ PAGINA_GRUA = """<!doctype html>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { font-family: system-ui, sans-serif; margin:0; padding:12px;
-         background:#0b1220; color:#e6edf7; font-size:20px; }
+         background:#0b1220; color:#e6edf7; font-size:20px; position:relative; }
   h1 { font-size:20px; margin:0 0 10px; color:#93a4bf; font-weight:600; }
   .tarjeta { background:#16233a; border-radius:14px; padding:16px; margin-bottom:12px; }
   .de { font-size:16px; color:#93a4bf; }
@@ -173,6 +212,9 @@ PAGINA_GRUA = """<!doctype html>
 </style>
 </head>
 <body>
+<a href="/" style="position:absolute;top:10px;right:12px;color:#93a4bf;
+   text-decoration:none;font-size:14px;border:1px solid #2b3d5c;border-radius:8px;
+   padding:6px 10px;background:#16233a;">← Menú</a>
 <h1 id="titulo">Grua — reaprovisionamiento</h1>
 
 <div id="login">
@@ -309,6 +351,263 @@ cargarOperadores();
 </html>
 """
 
+
+# Estilo comun a todas las pantallas de escritorio (no las del Zebra)
+ESTILO_OFICINA = """
+  :root { --fondo:#f1f5f9; --panel:#fff; --borde:#cbd5e1; --texto:#0f172a;
+          --suave:#64748b; --acento:#1e40af; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:0;
+         background:var(--fondo); color:var(--texto); }
+  header { background:#fff; border-bottom:1px solid var(--borde); padding:16px 24px;
+           display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:19px; font-weight:600; }
+  .volver { text-decoration:none; color:var(--acento); font-size:13px; font-weight:600;
+            border:1px solid var(--borde); border-radius:6px; padding:8px 14px;
+            background:#fff; }
+  .volver:hover { background:#eff6ff; }
+  .wrap { max-width:1100px; margin:0 auto; padding:24px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em;
+       color:var(--suave); font-weight:600; margin:22px 0 12px; }
+  h2:first-child { margin-top:0; }
+  .panel { background:var(--panel); border:1px solid var(--borde); border-radius:8px;
+           padding:18px 20px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid #e2e8f0; }
+  th { color:var(--suave); font-weight:600; background:#f8fafc; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .card { background:#fff; border:1px solid var(--borde); border-radius:8px; padding:14px 16px; }
+  .card .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+               color:var(--suave); }
+  .card .val { font-size:24px; font-weight:700; margin-top:4px;
+               font-variant-numeric:tabular-nums; }
+  .card .val small { font-size:12px; font-weight:400; color:var(--suave); }
+  .barra { height:10px; background:#e2e8f0; border-radius:5px; overflow:hidden; margin-top:6px; }
+  .barra > i { display:block; height:100%; background:var(--acento); }
+  .btn { display:inline-block; padding:10px 16px; font-size:14px; border-radius:6px;
+         border:1px solid var(--borde); background:#f8fafc; color:var(--texto);
+         cursor:pointer; text-decoration:none; }
+  .btn:hover { background:#e2e8f0; }
+  .btn.pri { background:var(--acento); color:#fff; border-color:var(--acento); }
+  input, select { font-size:14px; padding:9px 11px; border:1px solid var(--borde);
+                  border-radius:6px; width:100%; background:#fff; color:var(--texto); }
+  .alerta { padding:10px 14px; border-radius:6px; font-size:13px; margin-bottom:12px; }
+  .alerta.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .alerta.warn { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
+  .alerta.err { background:#fee2e2; color:#991b1b; border:1px solid #fca5a5; }
+  footer { color:var(--suave); font-size:12px; text-align:center; padding:24px; }
+"""
+
+CABECERA = """
+<header>
+  <a class="volver" href="/">← Volver al menú</a>
+  <h1>{titulo}</h1>
+</header>
+"""
+
+PAGINA_ESTADO = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estado del stock</title><style>""" + ESTILO_OFICINA + """</style></head>
+<body>
+""" + CABECERA.format(titulo="Estado del stock") + """
+<div class="wrap">
+  <div class="cards" id="cards"></div>
+  <h2>Movimientos del día</h2>
+  <div class="panel"><table id="mov"><tbody></tbody></table></div>
+  <h2>Tareas de picking</h2>
+  <div class="panel"><table id="tareas"><tbody></tbody></table></div>
+  <h2>Recepción</h2>
+  <div class="panel"><table id="recep"><tbody></tbody></table></div>
+</div>
+<footer>Sistema de contingencia</footer>
+<script>
+function card(lbl, val, sub) {
+  return '<div class="card"><div class="lbl">' + lbl + '</div>' +
+         '<div class="val">' + val + (sub ? ' <small>' + sub + '</small>' : '') +
+         '</div></div>';
+}
+function fila(a, b, c) {
+  return '<tr><td>' + a + '</td><td class="num">' + b +
+         '</td><td class="num">' + (c === undefined ? '' : c) + '</td></tr>';
+}
+async function cargar() {
+  const r = await fetch('/api/estado');
+  const j = await r.json();
+  const s = j.stock || {}, t = j.tareas || {}, rec = j.recepcion || {};
+  document.getElementById('cards').innerHTML =
+    card('Cajas pickeadas', s.pickeado || 0) +
+    card('Cajas recibidas', rec.cajas || 0) +
+    card('Reservado', s.reservado || 0, 'en tareas') +
+    card('Disponible', s.disponible || 0) +
+    card('Recepciones', rec.recepciones || 0) +
+    card('Sin ubicar', rec.pendientes || 0);
+  let mt = '';
+  mt += fila('Picking', (t.ok ? t.ok.tareas : 0) + (t.parcial ? t.parcial.tareas : 0),
+             (t.ok ? t.ok.cajas : 0) + (t.parcial ? t.parcial.cajas : 0));
+  mt += fila('Reaprovisionamiento', rec.movimientos ? '' : '', '');
+  document.getElementById('mov').querySelector('tbody').innerHTML = mt;
+  let tt = '<tr><th>Estado</th><th>Tareas</th><th>Cajas</th></tr>';
+  for (const [k, v] of Object.entries(t)) {
+    tt += fila(k, v.tareas, v.cajas);
+  }
+  if (!Object.keys(t).length) tt += '<tr><td colspan="3">Sin tareas.</td></tr>';
+  document.getElementById('tareas').querySelector('tbody').innerHTML = tt;
+  document.getElementById('recep').querySelector('tbody').innerHTML =
+    '<tr><th>Concepto</th><th>Total</th><th></th></tr>' +
+    fila('Recepciones', rec.recepciones || 0, '') +
+    fila('Cajas recibidas', rec.cajas || 0, '') +
+    fila('Pendientes de ubicar', rec.pendientes || 0, '') +
+    fila('Sin vencimiento', rec.sin_vencimiento || 0, '');
+}
+cargar();
+</script>
+</body></html>
+"""
+
+PAGINA_COLA = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Cola de trabajos</title><style>""" + ESTILO_OFICINA + """</style></head>
+<body>
+""" + CABECERA.format(titulo="Operaciones de sistema — cola de trabajos") + """
+<div class="wrap">
+  <div id="avisos"></div>
+  <div class="cards" id="resumen"></div>
+
+  <h2>Avance de los trabajos</h2>
+  <div class="panel" id="avance"></div>
+
+  <h2>Cola de picking</h2>
+  <div class="panel"><table id="cola"><tbody></tbody></table></div>
+
+  <h2>Cola de reaprovisionamiento</h2>
+  <div class="panel"><table id="colaReapro"><tbody></tbody></table></div>
+
+  <h2>Productividad por operario</h2>
+  <div class="panel"><table id="prod"><tbody></tbody></table></div>
+</div>
+<footer>Se actualiza solo cada 30 segundos</footer>
+<script>
+function card(lbl, val, sub) {
+  return '<div class="card"><div class="lbl">' + lbl + '</div>' +
+         '<div class="val">' + val + (sub ? ' <small>' + sub + '</small>' : '') +
+         '</div></div>';
+}
+async function cargar() {
+  const r = await fetch('/api/cola');
+  const j = await r.json();
+
+  document.getElementById('resumen').innerHTML =
+    card('Movimientos del día', j.movimientos_totales) +
+    card('Cajas movidas', j.cajas_movidas) +
+    card('Tareas pendientes', j.picking.pendientes, 'picking') +
+    card('Reapro pendientes', j.reapro.pendientes, 'grúa');
+
+  let av = '';
+  (j.desglose || []).forEach(m => {
+    const tot = j.movimientos_totales || 1;
+    const pct = Math.round(m.movimientos / tot * 100);
+    av += '<div style="margin-bottom:12px;">' +
+      '<div style="display:flex;justify-content:space-between;font-size:13px;">' +
+      '<span>' + m.tipo + '</span><span class="num">' + m.movimientos +
+      ' mov · ' + m.cajas + ' cajas</span></div>' +
+      '<div class="barra"><i style="width:' + pct + '%"></i></div></div>';
+  });
+  document.getElementById('avance').innerHTML = av || 'Sin movimientos.';
+
+  let c = '<tr><th>Ubicación</th><th>SKU</th><th>Cantidad</th><th>Usuario</th></tr>';
+  (j.cola_picking || []).forEach(t => {
+    c += '<tr><td>' + t.ubicacion + '</td><td>' + t.sku +
+         '</td><td class="num">' + t.cantidad + '</td><td>' +
+         (t.usuario || '—') + '</td></tr>';
+  });
+  if (!(j.cola_picking || []).length) c += '<tr><td colspan="4">Cola vacía.</td></tr>';
+  document.getElementById('cola').querySelector('tbody').innerHTML = c;
+
+  let cr = '<tr><th>Origen</th><th>Destino</th><th>Cantidad</th><th>Operador</th></tr>';
+  (j.cola_reapro || []).forEach(t => {
+    cr += '<tr><td>' + (t.origen || '—') + '</td><td>' + t.destino +
+          '</td><td class="num">' + t.cantidad + '</td><td>' +
+          (t.operador || '—') + '</td></tr>';
+  });
+  if (!(j.cola_reapro || []).length) cr += '<tr><td colspan="4">Cola vacía.</td></tr>';
+  document.getElementById('colaReapro').querySelector('tbody').innerHTML = cr;
+
+  let p = '<tr><th>Operario</th><th>Movimientos</th><th>Cajas</th></tr>';
+  (j.productividad || []).forEach(x => {
+    p += '<tr><td>' + x.etiqueta + '</td><td class="num">' + x.movimientos +
+         '</td><td class="num">' + x.cajas + '</td></tr>';
+  });
+  document.getElementById('prod').querySelector('tbody').innerHTML = p;
+}
+cargar();
+</script>
+</body></html>
+"""
+
+PAGINA_OPERARIOS = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operarios</title><style>""" + ESTILO_OFICINA + """</style></head>
+<body>
+""" + CABECERA.format(titulo="Operarios") + """
+<div class="wrap">
+  <div id="aviso"></div>
+  <h2>Picking</h2>
+  <div class="panel"><table id="tp"><tbody></tbody></table></div>
+  <h2>Grúa</h2>
+  <div class="panel"><table id="tg"><tbody></tbody></table></div>
+  <p style="font-size:13px;color:#64748b;max-width:640px;">
+    Los usuarios son fijos. Escriba el nombre del operario que usará cada uno hoy.
+    Al final del día, la productividad se mide con esos nombres.
+  </p>
+</div>
+<footer>Sistema de contingencia</footer>
+<script>
+function tabla(id, ops) {
+  let h = '<tr><th>Usuario</th><th>Nombre del operario</th><th>PIN</th><th></th></tr>';
+  ops.forEach(o => {
+    h += '<tr><td style="font-weight:600;">' + o.codigo + '</td>' +
+      '<td><input id="n_' + o.codigo + '" value="' + (o.nombre || '') +
+      '" placeholder="sin asignar"></td>' +
+      '<td style="width:110px;"><input id="p_' + o.codigo + '" value="' +
+      (o.pin || '') + '" maxlength="6"></td>' +
+      '<td style="width:90px;"><button class="btn" onclick="guardar(\'' +
+      o.codigo + '\',\'' + o.rol + '\')">Guardar</button></td></tr>';
+  });
+  document.getElementById(id).querySelector('tbody').innerHTML = h;
+}
+async function cargar() {
+  const r = await fetch('/api/operarios');
+  const j = await r.json();
+  const ops = j.operadores || [];
+  tabla('tp', ops.filter(o => o.rol === 'picking'));
+  tabla('tg', ops.filter(o => o.rol === 'grua'));
+}
+async function guardar(codigo, rol) {
+  const r = await fetch('/api/operarios/asignar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({codigo: codigo, rol: rol,
+      nombre: document.getElementById('n_' + codigo).value,
+      pin: document.getElementById('p_' + codigo).value}),
+  });
+  const j = await r.json();
+  document.getElementById('aviso').innerHTML = j.ok
+    ? '<div class="alerta ok">Guardado: ' + codigo + '</div>'
+    : '<div class="alerta err">' + (j.error || 'Error') + '</div>';
+  cargar();
+}
+cargar();
+</script>
+</body></html>
+"""
+
 PAGINA_REAPRO = """<!doctype html>
 <html lang="es">
 <head>
@@ -318,7 +617,7 @@ PAGINA_REAPRO = """<!doctype html>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 12px;
-         background: #0b1220; color: #e6edf7; font-size: 17px; }
+         background: #0b1220; color: #e6edf7; font-size: 17px; position: relative; }
   h1 { font-size: 20px; margin: 0 0 10px; color: #93a4bf; font-weight: 600; }
   .tarjeta { background:#16233a; border-radius:14px; padding:16px; margin-bottom:12px; }
   table { width:100%; border-collapse: collapse; font-size:14px; }
@@ -339,6 +638,9 @@ PAGINA_REAPRO = """<!doctype html>
 </style>
 </head>
 <body>
+<a href="/" style="position:absolute;top:10px;right:12px;color:#93a4bf;
+   text-decoration:none;font-size:14px;border:1px solid #2b3d5c;border-radius:8px;
+   padding:6px 10px;background:#16233a;">← Menú</a>
 <h1>Reaprovisionamiento — almacen a picking</h1>
 <div id="msg">Cargando lo que esta bajo el minimo...</div>
 
@@ -441,7 +743,7 @@ PAGINA_RECEPCION = """<!doctype html>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 12px;
-         background: #0b1220; color: #e6edf7; font-size: 20px; }
+         background: #0b1220; color: #e6edf7; font-size: 20px; position: relative; }
   h1 { font-size: 20px; margin: 0 0 10px; color: #93a4bf; font-weight: 600; }
   .tarjeta { background: #16233a; border-radius: 14px; padding: 16px; margin-bottom: 12px; }
   .etq { font-size: 15px; color: #93a4bf; margin-bottom: 6px; }
@@ -467,6 +769,9 @@ PAGINA_RECEPCION = """<!doctype html>
 </head>
 <body>
 
+<a href="/" style="position:absolute;top:10px;right:12px;color:#93a4bf;
+   text-decoration:none;font-size:14px;border:1px solid #2b3d5c;border-radius:8px;
+   padding:6px 10px;background:#16233a;">← Menú</a>
 <h1>Recepcion — contingencia</h1>
 <div id="msg">Escanee el LPN de la tarja.</div>
 
@@ -705,7 +1010,7 @@ PAGINA = """<!doctype html>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 12px;
-         background: #0b1220; color: #e6edf7; font-size: 20px; }
+         background: #0b1220; color: #e6edf7; font-size: 20px; position: relative; }
   h1 { font-size: 20px; margin: 0 0 10px; color: #93a4bf; font-weight: 600; }
 
   #progreso { font-size: 16px; color: #93a4bf; margin-bottom: 10px; }
@@ -744,6 +1049,9 @@ PAGINA = """<!doctype html>
 </head>
 <body>
 
+<a href="/" style="position:absolute;top:10px;right:12px;color:#93a4bf;
+   text-decoration:none;font-size:14px;border:1px solid #2b3d5c;border-radius:8px;
+   padding:6px 10px;background:#16233a;">← Menú</a>
 <h1>Picking — contingencia</h1>
 <div id="progreso"></div>
 
@@ -828,7 +1136,7 @@ $('btnEntrarP').addEventListener('click', async () => {
     return;
   }
   $('loginP').classList.add('oculto');
-  $('tituloP').textContent = 'Picking — ' + (j.nombre || usuario);
+  document.querySelector('h1').textContent = 'Picking — ' + (j.nombre || usuario);
   $('pinP').value = '';
   cargarTarea();
 });
@@ -1083,6 +1391,42 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA_REAPRO)
             return
 
+        if u.path == "/estado":
+            self._html(PAGINA_ESTADO)
+            return
+
+        if u.path == "/cola":
+            self._html(PAGINA_COLA)
+            return
+
+        if u.path == "/operarios":
+            self._html(PAGINA_OPERARIOS)
+            return
+
+        if u.path == "/api/cola":
+            from . import informe_dia, operarios, reapro
+            fecha = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+            d = informe_dia.recopilar(self.db, fecha)
+            with _conectar(self.db) as con:
+                cola_p = [dict(f) for f in con.execute(
+                    """SELECT ubicacion, sku, cantidad, usuario FROM tareas
+                        WHERE estado = 'pendiente' ORDER BY id LIMIT 60""").fetchall()]
+                cola_r = [dict(f) for f in con.execute(
+                    """SELECT origen, destino, cantidad, operador FROM reapro
+                        WHERE estado = 'pendiente' ORDER BY id LIMIT 60""").fetchall()]
+            self._json({
+                "ok": True,
+                "movimientos_totales": d.movimientos_totales,
+                "cajas_movidas": d.cajas_movidas,
+                "desglose": d.desglose_movimientos(),
+                "picking": {"pendientes": d.tareas.get("pendiente", {}).get("tareas", 0)},
+                "reapro": {"pendientes": d.reapro.get("pendientes", 0)},
+                "cola_picking": cola_p, "cola_reapro": cola_r,
+                "productividad": [p for p in operarios.productividad(self.db, "picking")
+                                  if p["movimientos"]],
+            })
+            return
+
         if u.path == "/grua":
             self._html(PAGINA_GRUA)
             return
@@ -1106,8 +1450,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/api/reapro/operadores", "/api/operarios"):
             from . import operarios
             rol = qs.get("rol", ["grua" if u.path.endswith("reapro/operadores") else ""])[0]
+            with _conectar(self.db) as con:
+                pines = {str(f["codigo"]): str(f["pin"] or "")
+                         for f in con.execute("SELECT codigo, pin FROM operarios")}
             self._json({"ok": True, "operadores": [
-                {"codigo": o["codigo"], "nombre": o["nombre"],
+                {"codigo": o["codigo"], "nombre": o["nombre"], "rol": o["rol"],
+                 "pin": pines.get(o["codigo"], ""),
                  "etiqueta": f"{o['codigo']} — {o['nombre']}" if o["nombre"] else o["codigo"]}
                 for o in operarios.listar(self.db, rol)]})
             return
