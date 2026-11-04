@@ -300,6 +300,42 @@ def cmd_stock_vivo(args) -> int:
     return 0
 
 
+def cmd_operarios(args) -> int:
+    from . import operarios
+
+    ruta = Path(args.db)
+    operarios.sembrar(ruta)
+
+    if args.asignar:
+        r = operarios.asignar(ruta, args.asignar, args.nombre or "",
+                              args.rol or "", args.pin or "")
+        if not r["ok"]:
+            print(f"[!] {r['error']}")
+            return 1
+        print(f"Asignado: {r['codigo']} -> {r['nombre'] or '(sin nombre)'}")
+        return 0
+
+    if args.productividad:
+        for rol in ("picking", "grua"):
+            print(f"\nProductividad — {rol}:")
+            prod = operarios.productividad(ruta, rol)
+            for p in prod:
+                etq = p["etiqueta"]
+                print(f"  {etq:22} {p['movimientos']:>4} mov  {p['cajas']:>6} cajas")
+        return 0
+
+    # Por defecto: listar
+    print("Operarios:")
+    for rol in ("picking", "grua"):
+        print(f"\n  {rol}:")
+        for o in operarios.listar(ruta, rol):
+            etq = f"{o['codigo']} — {o['nombre']}" if o["nombre"] else o["codigo"]
+            print(f"    {etq}")
+    print("\nPara asignar un nombre:")
+    print("  python -m src.plan_b_main operarios --asignar PICK1 --nombre Juan")
+    return 0
+
+
 def cmd_informe_dia(args) -> int:
     from . import informe_dia
 
@@ -466,6 +502,15 @@ def main() -> int:
     p.add_argument("--detalle", action="store_true",
                    help="Muestra las filas con movimiento")
     p.set_defaults(func=cmd_stock_vivo)
+
+    p = sub.add_parser("operarios", help="Usuarios fijos y productividad")
+    p.add_argument("--asignar", default="", help="Codigo del usuario (ej. PICK1)")
+    p.add_argument("--nombre", default="", help="Nombre del operario")
+    p.add_argument("--rol", default="", choices=["", "picking", "grua"])
+    p.add_argument("--pin", default="")
+    p.add_argument("--productividad", action="store_true",
+                   help="Mostrar movimientos por operario")
+    p.set_defaults(func=cmd_operarios)
 
     p = sub.add_parser("informe-dia", help="Informe del dia de contingencia")
     p.add_argument("--fecha", default=None)

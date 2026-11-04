@@ -567,6 +567,29 @@ completar**. Eso ya lo hace el propio destinado de tareas.
   `stock_vivo.ingresar()`: antes fusionaba por ubicación+lote+SKU sin mirar el
   vencimiento, y la fila quedaba con una fecha sola.
 
+### Operarios fijos, PIN y productividad
+- `src/operarios.py` — **usuarios FIJOS** (no hay registro ni administración):
+  `PICK1..PICK4` (picking) y `GRUA1..GRUA2` (grúa). El supervisor les **asigna**
+  el nombre del operario del día: *"el usuario PICK1 se destinó a Juan"* → al
+  final se sabe quién hizo cada movimiento. Tabla `operarios` (se siembra sola).
+  - `asignar()`, `nombre()`, `etiqueta()`, `verificar_pin()`, `listar()`.
+  - `productividad(db, rol)` — cruza los usuarios con lo que movieron (tablas
+    `picking` y `reapro`). Sirve para medir sin haber registrado usuarios.
+  - PIN por defecto: PICK1=1111, PICK2=2222, PICK3=3333, PICK4=4444,
+    GRUA1=1111, GRUA2=2222.
+- **La tarea se ASIGNA al tomarla**: `picking.tomar_tarea()` le pone dueño cuando
+  el operario pide su primera tarea. Sin esto, las tareas no tienen dueño y no se
+  puede medir productividad ni terminar turno. Las tareas de otro operario NO se
+  entregan.
+- **Botón TERMINAR TURNO** en `/picking`: el operario marca que pickeó el último
+  ítem. `picking.terminar_turno()` libera las reservas de SUS tareas pendientes y
+  las marca `libre` (no `cerrada`: el día sigue y otro las puede retomar).
+- CLI: `operarios [--asignar PICK1 --nombre Juan] [--productividad]`.
+- El informe del día incluye una sección de **productividad por operario**.
+- `docs/PLAN_B_instalacion_Linux.md` — guía para levantar el sistema en el PC
+  Linux del usuario (instalación, IP fija, cargar datos, servidor, firewall,
+  respaldo, problemas comunes).
+
 ### Inspección / exploración de pantallas
 - `tools/inspeccionar_ui.py` — lista los `auto_id` de la ventana (calibración UI)
 - `tools/probar_captura.py` — login + copia de la grilla (sin correo)
@@ -588,9 +611,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **183 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **193 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

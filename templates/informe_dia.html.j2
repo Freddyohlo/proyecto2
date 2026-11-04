@@ -185,6 +185,24 @@
   </div>
   {% endif %}
 
+  {% if productividad %}
+  <div class="panel">
+    <h2>Productividad por operario (picking)</h2>
+    <table>
+      <thead><tr><th>Operario</th><th>Movimientos</th><th>Cajas</th></tr></thead>
+      <tbody>
+      {% for p in productividad %}
+        <tr><td>{{ p.etiqueta }}</td><td class="num">{{ p.movimientos }}</td>
+            <td class="num">{{ p.cajas }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p style="font-size:12px;color:var(--gris);margin-top:10px;">
+      Los usuarios son fijos (PICK1..PICK4) y se asignan a los operarios del día.
+    </p>
+  </div>
+  {% endif %}
+
   <div class="panel">
     <h2>Pickeado por SKU (top 40)</h2>
     {% if por_sku %}

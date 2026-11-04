@@ -772,6 +772,7 @@ PAGINA = """<!doctype html>
 
     <button id="btnOk" disabled>CONFIRMAR PICK</button>
     <button id="btnSaltar" class="gris">Saltar tarea</button>
+    <button id="btnTerminar" class="gris" style="background:#b45309;">TERMINAR TURNO</button>
   </div>
 </div>
 
@@ -785,6 +786,68 @@ const $ = id => document.getElementById(id);
 const scan = $('scan'), msg = $('msg'), btnOk = $('btnOk'), btnSaltar = $('btnSaltar');
 const pasoCant = $('pasoCant'), cant = $('cantidad');
 let tarea = null;
+let usuario = '';
+
+async function cargarOperadoresP() {
+  const r = await fetch('/api/operarios?rol=picking');
+  const j = await r.json();
+  const caja = $('operadoresP');
+  caja.innerHTML = '';
+  (j.operadores || []).forEach(o => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = o.etiqueta;
+    b.style.cssText = 'flex:1;min-width:120px;background:#1e293b;color:#e6edf7;' +
+      'border:2px solid #2b3d5c;border-radius:10px;padding:14px;font-size:17px;' +
+      'font-weight:700;margin-top:0;';
+    b.onclick = () => {
+      usuario = o.codigo;
+      [...caja.children].forEach(c => c.style.borderColor = '#2b3d5c');
+      b.style.borderColor = '#38bdf8';
+      $('btnEntrarP').disabled = !$('pinP').value.trim();
+      $('pinP').focus();
+    };
+    caja.appendChild(b);
+  });
+}
+
+$('pinP').addEventListener('input', () => {
+  $('btnEntrarP').disabled = !(usuario && $('pinP').value.trim());
+});
+
+$('btnEntrarP').addEventListener('click', async () => {
+  const r = await fetch('/api/entrar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({operador: usuario, pin: $('pinP').value.trim()}),
+  });
+  const j = await r.json();
+  if (!j.ok) {
+    $('msg').className = 'err';
+    $('msg').textContent = j.error || 'PIN incorrecto';
+    $('pinP').value = '';
+    return;
+  }
+  $('loginP').classList.add('oculto');
+  $('tituloP').textContent = 'Picking — ' + (j.nombre || usuario);
+  $('pinP').value = '';
+  cargarTarea();
+});
+
+$('btnTerminar').addEventListener('click', async () => {
+  if (!confirm('Terminar el turno? Las tareas que no alcanzaste a pickear ' +
+               'quedan libres para otro operario.')) return;
+  const r = await fetch('/api/picking/terminar', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({usuario: usuario}),
+  });
+  const j = await r.json();
+  if (!j.ok) { aviso('Error: ' + j.error, 'err'); return; }
+  aviso('✅ Turno terminado. ' + j.liberadas + ' tareas liberadas (' +
+        j.cajas_liberadas + ' cajas). Quedan ' + j.quedan_pendientes +
+        ' pendientes en total.', 'ok');
+  $('trabajo').classList.add('oculto');
+  $('hecho').classList.remove('oculto');
+});
 
 function aviso(texto, clase) {
   msg.className = clase || '';
@@ -792,7 +855,7 @@ function aviso(texto, clase) {
 }
 
 async function cargarTarea() {
-  const r = await fetch('/api/tarea');
+  const r = await fetch('/api/tarea?usuario=' + encodeURIComponent(usuario));
   const j = await r.json();
   if (!j.ok) {
     $('trabajo').classList.add('oculto');
@@ -876,7 +939,7 @@ btnSaltar.addEventListener('click', async () => {
   cargarTarea();
 });
 
-cargarTarea();
+cargarOperadoresP();
 </script>
 </body>
 </html>
@@ -996,10 +1059,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/tarea":
-            t = pk.tarea_pendiente(self.db)
+            usuario = qs.get("usuario", [""])[0].strip()
+            t = pk.tarea_pendiente(self.db, usuario)
             if t is None:
                 self._json({"ok": False})
                 return
+            # Si la tarea no tiene duenio, la toma este usuario (queda registrado)
+            if usuario and not str(t.get("usuario") or "").strip():
+                pk.tomar_tarea(self.db, t["id"], usuario)
+                t["usuario"] = usuario
             self._json({"ok": True, "tarea": {
                 "id": t["id"], "ubicacion": t["ubicacion"], "sku": t["sku"],
                 "descripcion": t["descripcion"], "cantidad": t["cantidad"],
@@ -1035,12 +1103,20 @@ class Handler(BaseHTTPRequestHandler):
             }, "total": t["total"], "hechas": t["hechas"]})
             return
 
-        if u.path == "/api/reapro/operadores":
-            from . import reapro
+        if u.path in ("/api/reapro/operadores", "/api/operarios"):
+            from . import operarios
+            rol = qs.get("rol", ["grua" if u.path.endswith("reapro/operadores") else ""])[0]
             self._json({"ok": True, "operadores": [
-                {"codigo": c, "nombre": reapro.nombre_operador(c),
-                 "etiqueta": reapro.etiqueta_operador(c)}
-                for c in reapro.OPERADORES_GRUA]})
+                {"codigo": o["codigo"], "nombre": o["nombre"],
+                 "etiqueta": f"{o['codigo']} — {o['nombre']}" if o["nombre"] else o["codigo"]}
+                for o in operarios.listar(self.db, rol)]})
+            return
+
+        if u.path == "/api/productividad":
+            from . import operarios
+            rol = qs.get("rol", ["picking"])[0]
+            self._json({"ok": True, "rol": rol,
+                        "productividad": operarios.productividad(self.db, rol)})
             return
 
         if u.path == "/api/reapro/necesidades":
@@ -1091,16 +1167,33 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path)
 
-        if u.path == "/api/reapro/entrar":
-            from . import reapro
+        if u.path in ("/api/reapro/entrar", "/api/entrar"):
+            from . import operarios
             datos = self._cuerpo()
-            cod = str(datos.get("operador", "")).strip()
+            cod = str(datos.get("operador", datos.get("usuario", ""))).strip()
             pin = str(datos.get("pin", "")).strip()
-            if not reapro.verificar_pin(cod, pin):
+            if not operarios.verificar_pin(self.db, cod, pin):
                 self._json({"ok": False, "error": "PIN incorrecto"}, 401)
                 return
             self._json({"ok": True, "operador": cod,
-                        "nombre": reapro.nombre_operador(cod)})
+                        "nombre": operarios.nombre(self.db, cod)})
+            return
+
+        if u.path == "/api/picking/terminar":
+            datos = self._cuerpo()
+            r = pk.terminar_turno(self.db, str(datos.get("usuario", "")).strip())
+            self._json(r)
+            return
+
+        if u.path == "/api/operarios/asignar":
+            from . import operarios
+            datos = self._cuerpo()
+            r = operarios.asignar(self.db,
+                                  str(datos.get("codigo", "")).strip(),
+                                  str(datos.get("nombre", "")).strip(),
+                                  str(datos.get("rol", "")).strip(),
+                                  str(datos.get("pin", "")).strip())
+            self._json(r)
             return
 
 

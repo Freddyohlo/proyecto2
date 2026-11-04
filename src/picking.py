@@ -40,6 +40,29 @@ from . import stock_vivo as sv
 
 TABLA_TAREAS = "tareas"
 
+# Usuarios FIJOS de picking. No hace falta registrarlos ni administrarlos: son
+# un puñado de usuarios que el supervisor ASIGNA a los operarios del dia.
+# Ej.: "el usuario PICK1 se destino al operario X" -> al final se sabe quien es.
+# Se pueden cambiar aca.
+USUARIOS_PICKING = {
+    "PICK1": "",
+    "PICK2": "",
+    "PICK3": "",
+    "PICK4": "",
+}
+
+
+def nombre_picking(codigo: str) -> str:
+    """Nombre del operario asignado a un usuario de picking (si se cargo)."""
+    codigo = str(codigo or "").strip().upper()
+    return USUARIOS_PICKING.get(codigo, "")
+
+
+def etiqueta_picking(codigo: str) -> str:
+    """Etiqueta para mostrar: 'PICK1 — Juan' (o solo el codigo)."""
+    n = nombre_picking(codigo)
+    return f"{codigo} — {n}" if n else codigo
+
 
 @dataclass
 class Tarea:
@@ -170,20 +193,101 @@ def destinar(
 # Consultar
 # ---------------------------------------------------------------------------
 
-def tarea_pendiente(db: str | Path) -> dict | None:
-    """Toma la primera tarea pendiente. No la reserva (ya se reservo al destinar)."""
+def tomar_tarea(db: str | Path, id_tarea: int, usuario: str) -> dict:
+    """Asigna la tarea a un usuario: desde aca es "suya".
+
+    Sin esto, la tarea no tiene dueño y no se puede medir productividad ni
+    terminar turno. Se llama cuando el operario pide su primera tarea.
+    """
+    if not str(usuario or "").strip():
+        return {"ok": False, "error": "falta el usuario", "code": 400}
+    usuario = str(usuario).strip().upper()
+
     with sv.abrir(db) as con:
         preparar_tablas(con)
-        fila = con.execute(
-            f"SELECT * FROM {TABLA_TAREAS} WHERE estado = 'pendiente' ORDER BY id LIMIT 1"
+        t = con.execute(
+            f"SELECT usuario, estado FROM {TABLA_TAREAS} WHERE id = ?", (id_tarea,)
         ).fetchone()
+        if t is None:
+            return {"ok": False, "error": "tarea inexistente", "code": 404}
+        if t["estado"] != "pendiente":
+            return {"ok": False, "error": "la tarea ya no esta pendiente", "code": 400}
+        # Si ya es de otro, no se la quitamos
+        duenio = str(t["usuario"] or "").strip()
+        if duenio and duenio.upper() != usuario:
+            return {"ok": False, "error": f"la tarea es de {duenio}", "code": 409}
+        con.execute(
+            f"UPDATE {TABLA_TAREAS} SET usuario = ? WHERE id = ?", (usuario, id_tarea)
+        )
+    return {"ok": True, "id": id_tarea, "usuario": usuario}
+
+
+def tarea_pendiente(db: str | Path, usuario: str = "") -> dict | None:
+    """Toma la primera tarea disponible para ese usuario.
+
+    Disponible = pendiente y (sin dueño o de ese usuario). Las tareas de otro
+    operario NO se le entregan: cada uno trabaja lo suyo.
+    """
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        sql = f"SELECT * FROM {TABLA_TAREAS} WHERE estado = 'pendiente'"
+        params: tuple = ()
+        if usuario:
+            sql += " AND (COALESCE(usuario,'') = '' OR usuario = ?)"
+            params = (usuario,)
+        sql += " ORDER BY id LIMIT 1"
+        fila = con.execute(sql, params).fetchone()
         if fila is None:
             return None
-        total = con.execute(f"SELECT COUNT(*) FROM {TABLA_TAREAS}").fetchone()[0]
+        total = con.execute(
+            f"SELECT COUNT(*) FROM {TABLA_TAREAS} WHERE estado = 'pendiente'"
+        ).fetchone()[0]
         hechas = con.execute(
             f"SELECT COUNT(*) FROM {TABLA_TAREAS} WHERE estado IN ('ok','parcial')"
         ).fetchone()[0]
     return {**dict(fila), "total": total, "hechas": hechas}
+
+
+def terminar_turno(db: str | Path, usuario: str = "") -> dict:
+    """Cierra el turno de un usuario de picking.
+
+    Criterio del usuario: tiene que haber un boton de "terminar" para que el
+    operario marque que pickeo el ultimo item y el proceso pase a otro.
+
+    Lo que hace:
+      - LIBERA las reservas de las tareas pendientes de ese usuario (asi otro las
+        puede tomar: la mercaderia vuelve a estar disponible).
+      - Marca esas tareas como 'libre' (no 'cerrada': el dia sigue abierto y otro
+        operario puede retomarlas).
+      - Devuelve cuantas libero y cuantas quedan pendientes en total.
+    """
+    momento = datetime.now().isoformat(timespec="seconds")
+
+    with sv.abrir(db) as con:
+        preparar_tablas(con)
+        sql = f"SELECT id, fila_stock, reservado FROM {TABLA_TAREAS} WHERE estado = 'pendiente'"
+        params: tuple = ()
+        if usuario:
+            sql += " AND usuario = ?"
+            params = (usuario,)
+        mias = con.execute(sql, params).fetchall()
+
+        liberado = 0
+        for t in mias:
+            if t["fila_stock"]:
+                sv.liberar(con, t["fila_stock"], int(t["reservado"] or 0))
+                liberado += int(t["reservado"] or 0)
+            con.execute(
+                f"UPDATE {TABLA_TAREAS} SET estado = 'libre', fecha_ok = ? WHERE id = ?",
+                (momento, t["id"]),
+            )
+
+        quedan = con.execute(
+            f"SELECT COUNT(*) FROM {TABLA_TAREAS} WHERE estado = 'pendiente'"
+        ).fetchone()[0]
+
+    return {"ok": True, "liberadas": len(mias), "cajas_liberadas": liberado,
+            "quedan_pendientes": int(quedan), "momento": momento}
 
 
 def obtener_tarea(db: str | Path, id_tarea: int) -> dict | None:

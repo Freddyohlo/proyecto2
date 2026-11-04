@@ -36,6 +36,7 @@ class ResumenDia:
     reapro_mov: pd.DataFrame = field(default_factory=pd.DataFrame)
     reapro: dict = field(default_factory=dict)
     skus_nuevos: pd.DataFrame = field(default_factory=pd.DataFrame)
+    productividad: list = field(default_factory=list)
     por_sku: pd.DataFrame = field(default_factory=pd.DataFrame)
     ubicaciones: pd.DataFrame = field(default_factory=pd.DataFrame)
 
@@ -173,7 +174,10 @@ def recopilar(db: str | Path, fecha: str = "") -> ResumenDia:
             """SELECT ubicacion, COUNT(*) AS picks, SUM(cantidad) AS cajas
                  FROM picking GROUP BY ubicacion ORDER BY cajas DESC""", con)
 
+    from . import operarios as ops
+
     return ResumenDia(
+        productividad=ops.productividad(db, "picking"),
         fecha=fecha,
         generado=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         stock=sv.resumen(db),
@@ -254,6 +258,7 @@ def generar_html(d: ResumenDia, destino: str | Path,
         por_sku=d.por_sku.head(40).to_dict("records"),
         ubicaciones=d.ubicaciones.head(40).to_dict("records"),
         picking_mov=d.picking_mov.tail(60).to_dict("records"),
+        productividad=[p for p in d.productividad if p["movimientos"]],
         recepcion_mov=d.recepcion_mov.to_dict("records"),
         reapro=d.reapro,
         reapro_mov=d.reapro_mov.to_dict("records"),
