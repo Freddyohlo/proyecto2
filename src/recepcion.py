@@ -560,10 +560,17 @@ def resumen(db: str | Path) -> dict:
                        SUM(CASE WHEN COALESCE(fecha_vencimiento,'')='' THEN 1 ELSE 0 END) AS sin_venc
                   FROM {TABLA_RECEPCION}"""
         ).fetchone()
+    recepciones = int(f["n"] or 0)
+    ubicadas = int(f["ubic"] or 0)
     return {
-        "recepciones": int(f["n"] or 0),
+        "recepciones": recepciones,
         "cajas": int(f["cajas"] or 0),
         "pendientes": int(f["pend"] or 0),
-        "ubicadas": int(f["ubic"] or 0),
+        "ubicadas": ubicadas,
         "sin_vencimiento": int(f["sin_venc"] or 0),
+        # MOVIMIENTOS: cada accion fisica cuenta. Recibir un pallet es un
+        # movimiento (baja del camion) y ubicarlo es otro (va a la estanteria).
+        # Un pallet que se recibe y se ubica son 2 movimientos.
+        # OJO: las CAJAS no se duplican (son las mismas cajas movidas dos veces).
+        "movimientos": recepciones + ubicadas,
     }

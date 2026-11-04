@@ -360,8 +360,8 @@ def test_desglose_separa_por_tipo(db):
     assert desglose["Picking"]["cajas"] == 10
     assert desglose["Reaprovisionamiento (grua)"]["movimientos"] >= 1
     assert desglose["Reaprovisionamiento (grua)"]["cajas"] == 200
-    assert desglose["Recepcion"]["movimientos"] == 1
-    assert desglose["Recepcion"]["cajas"] == 50
+    assert desglose["Recepcion (recibir + ubicar)"]["movimientos"] == 1
+    assert desglose["Recepcion (recibir + ubicar)"]["cajas"] == 50
     # La suma de los tipos da el total
     assert sum(m["movimientos"] for m in d.desglose_movimientos()) == d.movimientos_totales
 
@@ -383,3 +383,78 @@ def test_el_informe_muestra_los_movimientos(db, tmp_path):
     texto = html.read_text(encoding="utf-8")
     assert "Movimientos de la jornada" in texto
     assert "TOTAL" in texto
+
+
+# --------------------------------------------------------------------------
+# Ubicar cuenta como movimiento de recepcion (no como reapro)
+# --------------------------------------------------------------------------
+
+def test_recibir_y_ubicar_son_dos_movimientos_de_recepcion(db):
+    """Recibir el pallet es un movimiento; ubicarlo es otro. Ambos son recepcion."""
+    rc.recibir(db, rc.Recepcion(lpn="111", sku="700809", cantidad=198,
+                                fecha_vencimiento="01/12/2027"))
+    r = rc.resumen(db)
+    assert r["recepciones"] == 1
+    assert r["ubicadas"] == 0
+    assert r["movimientos"] == 1, "solo recibido"
+
+    rc.ubicar(db, 1, "C16-01-01-01", "RECEPTOR")
+    r = rc.resumen(db)
+    assert r["recepciones"] == 1
+    assert r["ubicadas"] == 1
+    assert r["movimientos"] == 2, "recibido + ubicado"
+
+
+def test_ubicar_no_cuenta_como_reapro(db):
+    """Ubicar pertenece a recepcion, NO al reapro (que es almacen -> picking)."""
+    from src import reapro as rp
+    rc.recibir(db, rc.Recepcion(lpn="111", sku="700809", cantidad=198,
+                                fecha_vencimiento="01/12/2027"))
+    rc.ubicar(db, 1, "C16-01-01-01", "RECEPTOR")
+
+    assert rp.resumen(db)["tareas"] == 0, "ubicar no genera tareas de reapro"
+    d = inf.recopilar(db)
+    desglose = {m["tipo"]: m for m in d.desglose_movimientos()}
+    assert desglose["Reaprovisionamiento (grua)"]["movimientos"] == 0
+    assert desglose["Recepcion (recibir + ubicar)"]["movimientos"] == 2
+
+
+def test_las_cajas_no_se_duplican_al_ubicar(db):
+    """Las cajas son las mismas: se mueven dos veces, pero son 198, no 396."""
+    rc.recibir(db, rc.Recepcion(lpn="111", sku="700809", cantidad=198,
+                                fecha_vencimiento="01/12/2027"))
+    rc.ubicar(db, 1, "C16-01-01-01", "RECEPTOR")
+    d = inf.recopilar(db)
+    assert d.cajas_recibidas == 198, "no se duplican las cajas"
+    assert d.cajas_movidas == 198
+    assert d.movimientos_totales == 2, "pero si son 2 movimientos"
+
+
+def test_movimientos_totales_con_todo(db):
+    """El total suma picks + reapros + recepcion (recibir y ubicar)."""
+    from src import reapro as rp
+    # 1 pick
+    pk.destinar(db, pd.DataFrame([("622", 12)], columns=["sku_clave", "cajas"]))
+    t = pk.tarea_pendiente(db)
+    pk.confirmar(db, t["id"], 12, "P1")
+    # 1 reapro
+    rp.destinar(db, operador="GRUA1")
+    while True:
+        tr = rp.tarea_pendiente(db)
+        if tr is None:
+            break
+        rp.confirmar(db, tr["id"], tr["cantidad"], "GRUA1")
+    # 1 recepcion recibida y ubicada = 2 movimientos
+    rc.recibir(db, rc.Recepcion(lpn="111", sku="700809", cantidad=198,
+                                fecha_vencimiento="01/12/2027"))
+    rc.ubicar(db, 1, "C16-01-01-01", "RECEPTOR")
+
+    d = inf.recopilar(db)
+    # 1 pick + 1 reapro + 2 de recepcion
+    assert d.movimientos_totales == 4
+    desglose = {m["tipo"]: m["movimientos"] for m in d.desglose_movimientos()}
+    assert desglose["Picking"] == 1
+    assert desglose["Reaprovisionamiento (grua)"] == 1
+    assert desglose["Recepcion (recibir + ubicar)"] == 2
+    # Y la suma del desglose da el total
+    assert sum(desglose.values()) == d.movimientos_totales

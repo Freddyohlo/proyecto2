@@ -72,7 +72,8 @@ class ResumenDia:
         picks = int(self.tareas.get("ok", {}).get("tareas", 0))
         picks += int(self.tareas.get("parcial", {}).get("tareas", 0))
         return picks + int(self.reapro.get("tareas", 0)) + int(
-            self.recepcion.get("recepciones", 0))
+            self.recepcion.get("movimientos",
+                               self.recepcion.get("recepciones", 0)))
 
     @property
     def cajas_movidas(self) -> int:
@@ -89,8 +90,9 @@ class ResumenDia:
             {"tipo": "Reaprovisionamiento (grua)",
              "movimientos": int(self.reapro.get("tareas", 0)),
              "cajas": self.cajas_reapro},
-            {"tipo": "Recepcion",
-             "movimientos": int(self.recepcion.get("recepciones", 0)),
+            {"tipo": "Recepcion (recibir + ubicar)",
+             "movimientos": int(self.recepcion.get("movimientos",
+                                                    self.recepcion.get("recepciones", 0))),
              "cajas": self.cajas_recibidas},
         ]
 
