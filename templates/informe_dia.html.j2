@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Informe del día — {{ d.fecha }}</title>
+<style>
+  :root { --azul:#2563eb; --verde:#16a34a; --rojo:#dc2626; --gris:#475569; --borde:#e2e8f0; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0;
+         background:#f1f5f9; color:#0f172a; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--gris); font-size: 13px; margin-bottom: 18px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
+           gap: 12px; margin-bottom: 16px; }
+  .card { background:#fff; border:1px solid var(--borde); border-radius:10px; padding:14px 16px; }
+  .card .lbl { font-size: 11px; color: var(--gris); text-transform: uppercase;
+               letter-spacing:.04em; }
+  .card .val { font-size: 23px; font-weight: 700; margin-top: 4px; }
+  .card .val small { font-size: 12px; font-weight: 500; color: var(--gris); }
+  .alerta { padding: 11px 15px; border-radius:10px; margin-bottom: 10px; font-size: 14px;
+            font-weight: 600; }
+  .alerta.ok { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .alerta.warn { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
+  .alerta.info { background:#dbeafe; color:#1e40af; border:1px solid #93c5fd; }
+  .panel { background:#fff; border:1px solid var(--borde); border-radius:10px;
+           padding:16px; margin-bottom: 18px; }
+  .panel h2 { font-size: 15px; margin: 0 0 12px; }
+  table { width:100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { padding: 6px 8px; text-align: right; border-bottom: 1px solid var(--borde); }
+  th:first-child, td:first-child { text-align: left; }
+  th { background:#f8fafc; color:var(--gris); font-weight:600; }
+  .num { font-variant-numeric: tabular-nums; }
+  .pie { color: var(--gris); font-size: 12px; text-align: center; margin: 26px 0 10px; }
+  @media print { body { background:#fff; } .panel, .card { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Informe del día — contingencia</h1>
+  <div class="sub">
+    Fecha {{ d.fecha }} · generado {{ d.generado }} · Blue Yonder fuera de servicio
+  </div>
+
+  {% for a in alertas %}
+    <div class="alerta {{ a.nivel }}">{{ a.texto }}</div>
+  {% endfor %}
+
+  <div class="cards">
+    <div class="card" style="grid-column: span 2; background:#1e293b; color:#e6edf7;">
+      <div class="lbl" style="color:#93a4bf;">Movimientos de la jornada</div>
+      <div class="val num" style="font-size:34px;">{{ d.movimientos_totales }}
+        <small style="color:#93a4bf;">movimientos · {{ d.cajas_movidas }} cajas</small>
+      </div>
+    </div>
+    <div class="card">
+      <div class="lbl">Cajas pickeadas</div>
+      <div class="val num">{{ stock.pickeado }}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Cajas recibidas</div>
+      <div class="val num">{{ d.cajas_recibidas }}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Movs. de reapro</div>
+      <div class="val num">{{ reapro.tareas or 0 }}
+        <small>({{ d.cajas_reapro }} cajas)</small></div>
+    </div>
+    <div class="card">
+      <div class="lbl">Reservado (en tareas)</div>
+      <div class="val num">{{ stock.reservado }}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Disponible</div>
+      <div class="val num">{{ stock.disponible }}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Ubicaciones tocadas</div>
+      <div class="val num">{{ d.ubicaciones|length }}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Recepciones</div>
+      <div class="val num">{{ recep.recepciones }}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Movimientos de la jornada</h2>
+    <table>
+      <thead><tr><th>Tipo de movimiento</th><th>Movimientos</th><th>Cajas</th></tr></thead>
+      <tbody>
+      {% for m in d.desglose_movimientos() %}
+        <tr><td>{{ m.tipo }}</td><td class="num">{{ m.movimientos }}</td>
+            <td class="num">{{ m.cajas }}</td></tr>
+      {% endfor %}
+        <tr style="font-weight:700;background:#f8fafc;">
+          <td>TOTAL</td>
+          <td class="num">{{ d.movimientos_totales }}</td>
+          <td class="num">{{ d.cajas_movidas }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Tareas de picking</h2>
+    <table>
+      <thead><tr><th>Estado</th><th>Tareas</th><th>Cajas</th></tr></thead>
+      <tbody>
+      {% for estado, v in tareas.items() %}
+        <tr><td>{{ estado }}</td><td class="num">{{ v.tareas }}</td>
+            <td class="num">{{ v.cajas }}</td></tr>
+      {% else %}
+        <tr><td colspan="3">Sin tareas registradas.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Recepciones del día</h2>
+    {% if recepcion_mov %}
+    <table>
+      <thead><tr><th>LPN</th><th>SKU</th><th>Descripción</th><th>Cajas</th>
+                 <th>Vence</th><th>Ubicación final</th><th>Estado</th></tr></thead>
+      <tbody>
+      {% for r in recepcion_mov %}
+        <tr>
+          <td>{{ r.lpn }}</td><td>{{ r.sku }}</td>
+          <td>{{ r.descripcion or '—' }}</td>
+          <td class="num">{{ r.cantidad }}</td>
+          <td>{{ r.fecha_vencimiento or '—' }}</td>
+          <td>{{ r.ubicacion_final or '—' }}</td>
+          <td>{{ r.estado }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p>No hubo recepciones.</p>
+    {% endif %}
+  </div>
+
+  {% if reapro_mov %}
+  <div class="panel">
+    <h2>Reaprovisionamiento — movimientos de la grúa ({{ reapro.tareas or 0 }}
+        movimientos, {{ d.cajas_reapro }} cajas)</h2>
+    <table>
+      <thead><tr><th>Operador</th><th>SKU</th><th>Descripción</th>
+                 <th>Bajó de</th><th>Dejó en</th><th>Cajas</th><th>Estado</th></tr></thead>
+      <tbody>
+      {% for r in reapro_mov %}
+        <tr>
+          <td>{{ r.operador or '—' }}</td>
+          <td>{{ r.sku }}</td>
+          <td>{{ r.descripcion or '—' }}</td>
+          <td>{{ r.origen or '—' }}</td>
+          <td>{{ r.destino }}</td>
+          <td class="num">{{ r.cantidad }}</td>
+          <td>{{ r.estado }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if skus_nuevos %}
+  <div class="panel">
+    <h2>SKU nuevos (no venían en la cuadratura)</h2>
+    <table>
+      <thead><tr><th>SKU</th><th>Descripción</th><th>Cajas</th><th>Ubicación</th>
+                 <th>Vence</th></tr></thead>
+      <tbody>
+      {% for s in skus_nuevos %}
+        <tr><td>{{ s.sku }}</td><td>{{ s.descripcion or '—' }}</td>
+            <td class="num">{{ s.cantidad }}</td>
+            <td>{{ s.ubicacion or '—' }}</td>
+            <td>{{ s.fecha_vencimiento or '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Pickeado por SKU (top 40)</h2>
+    {% if por_sku %}
+    <table>
+      <thead><tr><th>SKU</th><th>Descripción</th><th>Picks</th><th>Cajas</th></tr></thead>
+      <tbody>
+      {% for s in por_sku %}
+        <tr><td>{{ s.sku }}</td><td>{{ s.descripcion or '—' }}</td>
+            <td class="num">{{ s.picks }}</td><td class="num">{{ s.cajas }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p>No se pickeó nada.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Ubicaciones tocadas (para reingresar a Blue Yonder)</h2>
+    {% if ubicaciones %}
+    <table>
+      <thead><tr><th>Ubicación</th><th>Picks</th><th>Cajas</th></tr></thead>
+      <tbody>
+      {% for u in ubicaciones %}
+        <tr><td>{{ u.ubicacion }}</td><td class="num">{{ u.picks }}</td>
+            <td class="num">{{ u.cajas }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p style="font-size:12px;color:var(--gris);margin-top:10px;">
+      Estas son las ubicaciones que hay que congelar y reingresar cuando Blue
+      Yonder vuelva, para no pickear dos veces la misma caja.
+    </p>
+    {% else %}
+      <p>No se tocó ninguna ubicación.</p>
+    {% endif %}
+  </div>
+
+  <div class="pie">
+    Plan B — contingencia Blue Yonder · documento generado automáticamente
+  </div>
+</div>
+</body>
+</html>
