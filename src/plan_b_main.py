@@ -221,26 +221,76 @@ def cmd_contraste(args) -> int:
     return 0
 
 
+def cmd_sumario(args) -> int:
+    from . import sumario as sm
+
+    ruta = Path(args.db)
+    if not args.archivo:
+        raise SystemExit("Indica --archivo con el PDF (o .txt) del sumario de carga.")
+
+    s = sm.cargar_desde_archivo(args.archivo)
+    if s.filas == 0:
+        print("[!] No se leyeron lineas. Revisa el archivo.")
+        return 1
+
+    s.guardar(ruta)
+    print(f"Sumario de carga: {s.filas} lineas")
+    print(f"  Camiones : {len(s.camiones)}  -> {', '.join(s.camiones)}")
+    print(f"  Pallets  : {s.pallets}")
+    print(f"  Cajas    : {s.cajas}")
+    print(f"  SKUs     : {s.demanda_por_sku().shape[0]}")
+
+    print("\nPor camion:")
+    print(s.por_camion().to_string(index=False))
+
+    print("\nDemanda por SKU (top 10):")
+    print(s.demanda_por_sku().head(10).to_string(index=False))
+
+    print(f"\nGuardado en {ruta}. Ahora: "
+          f"python -m src.plan_b_main picking --desde-sumario")
+    return 0
+
+
 def cmd_picking(args) -> int:
     from . import externos, picking, stock_vivo
 
     ruta = Path(args.db)
-    try:
-        venta = externos.Venta.cargar(ruta)
-    except Exception:
-        venta = None
-    if venta is None or venta.dataframe.empty:
-        raise SystemExit(
-            "No hay venta cargada. Corre: "
-            "python -m src.plan_b_main venta --archivo <csv de TRUCK>"
-        )
+
+    if args.desde_sumario:
+        from . import sumario as sm
+        try:
+            s = sm.Sumario.cargar(ruta)
+        except Exception:
+            s = None
+        if s is None or s.dataframe.empty:
+            raise SystemExit(
+                "No hay sumario cargado. Corre: "
+                "python -m src.plan_b_main sumario --archivo <pdf>"
+            )
+        demanda = s.demanda_por_sku()
+        origen = "sumario de carga"
+    else:
+        try:
+            venta = externos.Venta.cargar(ruta)
+        except Exception:
+            venta = None
+        if venta is None or venta.dataframe.empty:
+            raise SystemExit(
+                "No hay venta cargada. Corre: "
+                "python -m src.plan_b_main venta --archivo <csv de TRUCK>\n"
+                "O usa el sumario: sumario --archivo <pdf> y luego "
+                "picking --desde-sumario"
+            )
+        demanda = venta.demanda_por_sku()
+        origen = "venta (TRUCK)"
+
+    print(f"Demanda desde: {origen}")
 
     # Asegura el stock vivo (foto + reservas + pickeado)
     filas = stock_vivo.inicializar(ruta, forzar=args.reiniciar_stock)
     if filas == 0:
         raise SystemExit("No hay stock. Corre primero: plan_b_main cargar --archivo <tsv>")
 
-    demanda = venta.demanda_por_sku()
     creadas, reservadas, faltantes = picking.destinar(
         ruta, demanda, incluir_almacenamiento=not args.solo_picking
     )
@@ -488,7 +538,13 @@ def main() -> int:
     p.add_argument("--exportar", default=None, help="Ruta CSV donde exportar el detalle")
     p.set_defaults(func=cmd_contraste)
 
+    p = sub.add_parser("sumario", help="Carga el sumario de carga (PDF) como demanda")
+    p.add_argument("--archivo", required=True, help="PDF del sumario (o .txt)")
+    p.set_defaults(func=cmd_sumario)
+
     p = sub.add_parser("picking", help="Destina tareas de picking (reserva el stock)")
+    p.add_argument("--desde-sumario", action="store_true",
+                   help="Tomar la demanda del sumario de carga (no de TRUCK)")
     p.add_argument("--solo-picking", action="store_true",
                    help="Buscar SOLO en AREA PICKING (por defecto tambien usa "
                         "ALMACENAMIENTO, que es el flujo real)")

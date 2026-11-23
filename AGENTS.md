@@ -507,6 +507,59 @@ Mitigaciones implementadas:
   el SKU escaneado no está en el stock (`origen: "codigo"`).
 - CLI: `python -m src.plan_b_main recepcion --sku-nuevo 700809 --cantidad 198 ...`.
 
+### 🆕 SUMARIO DE CARGA: la demanda del día (reemplaza al TRUCK)
+
+⚠️ **Cambio de enfoque (usuario):** cuando cae el sistema, la **distribución ya
+viene definida de afuera**. Nosotros NO decidimos la venta: la **recibimos**.
+El documento es el **SUMARIO DE CARGA** (PDF) que envían.
+
+```
+LOAD SUMMARY RET_CL SUMARIO DE CARGA *012R01*
+CAMION # : 012R-01 FECHA : 07-11-2026 *012R01*
+801
+PALLET PRODUCTO DESCRIPCION CANTIDAD
+001 00447085 3R MANZANA 5GL VNR275X24 20
+Sub Total 20
+002 00700153 MIS_VARIET-CS-VNR187CCX24 3
+00700154 MIS_VARIET-SB-VNR187CCX24 1
+00700229 GATO_PREMIUM-CS-VNR187CCX24 2
+00700682 MIS_RES_MS-CS-VNR750CCX6-CO 5
+Sub Total 11
+TOTAL : 95 PESO: 0
+```
+
+**Datos reales del PDF de ejemplo** (verificados): 9 camiones, **92 pallets**,
+**104 líneas de producto** (92 pallets + 12 continuaciones de pallets MIXTOS),
+**5.701 cajas**, 35 SKUs. La suma de Sub Totales = suma de TOTAL por camión =
+5.701 → el parseo cuadra.
+
+**⚠️ CLAVE — PALLETS MIXTOS:** solo la PRIMERA línea de cada pallet trae el
+número de pallet. Las siguientes traen solo PRODUCTO + DESCRIPCIÓN + CANTIDAD.
+El parser arrastra el pallet actual (`leer_texto`). Sin eso se perdían 12 líneas.
+
+**Campos que NO se usan** (confirmados por el usuario):
+- El número suelto tras el camión (`801`/`802`/`803`) es un **correlativo**.
+- El **orden** de los camiones lo define otra área (nosotros solo hacemos picking).
+- **Prioridad** no se usa.
+- El **pallet físico** no importa por ahora.
+- El SKU es independiente del código que se escanea (ese código es la **ubicación**).
+
+**El VOLANTE** (el otro PDF) es el papel de trabajo por pallet, con código de
+barras `0801 + camion + pallet` (ej. `0801012R0101` = almacén 0801, camión
+012R01, pallet 01). No hace falta leerlo: el sumario ya trae todo.
+
+**Módulo** `src/sumario.py`: `leer_pdf()`, `leer_texto()` (acepta .txt para
+probar), `cargar_desde_archivo()` (detecta .pdf/.txt), `por_camion()`,
+`por_pallet()`, `demanda_por_sku()` (formato que consume `picking.destinar`).
+Tabla `sumario`.
+
+**Comandos:**
+```bash
+python -m src.plan_b_main sumario --archivo "SUMARIO CARGA.pdf"
+python -m src.plan_b_main picking --desde-sumario
+```
+`picking` sin `--desde-sumario` sigue usando el TRUCK (compatibilidad).
+
 ### Flujo real del picking: el picking NO alcanza -> se baja de ALMACENAMIENTO
 ⚠️ **Corrección importante (usuario):** el reapro por mínimo es **redundante**.
 El flujo real es: la venta se cubre con el stock que tenemos, y **cuando la
@@ -628,9 +681,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **193 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **207 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).
