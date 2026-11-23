@@ -119,11 +119,6 @@ PAGINA_MENU = """<!doctype html>
         <div class="t">Pallet de armado</div>
         <div class="d">Ver el pallet completo con todos sus SKU y ubicaciones</div>
       </a>
-      <a class="op" href="/chequeo">
-        <span class="ico">→</span>
-        <div class="t">Chequeo por muestreo</div>
-        <div class="d">Elegir la muestra e imprimir las fichas de chequeo</div>
-      </a>
       <a class="op" href="/contraste">
         <span class="ico">→</span>
         <div class="t">Contraste volante</div>

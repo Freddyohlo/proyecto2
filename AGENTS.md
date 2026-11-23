@@ -571,6 +571,9 @@ Los **chequeadores** usan una **copia impresa del sumario** y verifican una
 - Pantalla `/chequeo`: elegir el %, generar las fichas, **imprimirlas** (tiene
   estilos `@media print` con casilleros ☐ y línea de firma), y registrar el
   resultado.
+- ⚠️ **El chequeo por muestreo es de OTRA ÁREA** (aclarado por el usuario:
+  "eso lo ve otra área igual de chequeadores"). Se **quitó del menú principal**;
+  el módulo y la pantalla quedan accesibles por URL pero **fuera del alcance**.
 - El % es **configurable** a propósito: cada bodega define el suyo. No se
   inventan tablas estadísticas AQL.
 
