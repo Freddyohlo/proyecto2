@@ -268,6 +268,7 @@ def cmd_picking(args) -> int:
                 "python -m src.plan_b_main sumario --archivo <pdf>"
             )
         demanda = s.demanda_por_sku()
+        detalle = s.dataframe
         origen = "sumario de carga"
     else:
         try:
@@ -282,6 +283,7 @@ def cmd_picking(args) -> int:
                 "picking --desde-sumario"
             )
         demanda = venta.demanda_por_sku()
+        detalle = None
         origen = "venta (TRUCK)"
 
     print(f"Demanda desde: {origen}")
@@ -292,7 +294,8 @@ def cmd_picking(args) -> int:
         raise SystemExit("No hay stock. Corre primero: plan_b_main cargar --archivo <tsv>")
 
     creadas, reservadas, faltantes = picking.destinar(
-        ruta, demanda, incluir_almacenamiento=not args.solo_picking
+        ruta, demanda, incluir_almacenamiento=not args.solo_picking,
+        detalle=detalle,
     )
     if creadas == 0:
         print("[!] No se generaron tareas. Revisa el stock disponible.")

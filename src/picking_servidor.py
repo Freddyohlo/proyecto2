@@ -114,6 +114,16 @@ PAGINA_MENU = """<!doctype html>
         <div class="t">Grúa</div>
         <div class="d">Tareas de bajada asignadas al operador de grúa</div>
       </a>
+      <a class="op" href="/pallet">
+        <span class="ico">→</span>
+        <div class="t">Pallet de armado</div>
+        <div class="d">Ver el pallet completo con todos sus SKU y ubicaciones</div>
+      </a>
+      <a class="op" href="/contraste">
+        <span class="ico">→</span>
+        <div class="t">Contraste volante</div>
+        <div class="d">Verificar lo anotado en el volante contra el sumario</div>
+      </a>
     </div>
   </div>
 
@@ -604,6 +614,178 @@ async function guardar(codigo, rol) {
   cargar();
 }
 cargar();
+</script>
+</body></html>
+"""
+
+
+PAGINA_PALLET = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pallet de armado</title><style>""" + ESTILO_OFICINA + """</style></head>
+<body>
+""" + CABECERA.format(titulo="Pallet de armado") + """
+<div class="wrap">
+  <div id="aviso"></div>
+  <div class="cards" id="cab"></div>
+  <h2>Contenido del pallet</h2>
+  <div class="panel"><table id="lineas"><tbody></tbody></table></div>
+  <p style="font-size:13px;color:#64748b;">
+    Para cada SKU: la ubicación donde está y cuánto hay disponible. Si no alcanza,
+    aparece en rojo.
+  </p>
+</div>
+<footer>Sistema de contingencia</footer>
+<script>
+const q = new URLSearchParams(location.search);
+const camion = q.get('camion') || '';
+const pallet = q.get('pallet') || '';
+async function cargar() {
+  const r = await fetch('/api/pallet?camion=' + encodeURIComponent(camion) +
+                        '&pallet=' + encodeURIComponent(pallet));
+  const j = await r.json();
+  if (!j.ok) {
+    document.getElementById('aviso').innerHTML =
+      '<div class="alerta err">' + (j.error || 'No se encontró el pallet') + '</div>';
+    return;
+  }
+  const p = j.pallet;
+  document.getElementById('cab').innerHTML =
+    '<div class="card"><div class="lbl">Camión</div><div class="val">' +
+      p.camion + '</div></div>' +
+    '<div class="card"><div class="lbl">Pallet</div><div class="val">' +
+      p.pallet + '</div></div>' +
+    '<div class="card"><div class="lbl">SKUs</div><div class="val">' +
+      p.skus + '</div></div>' +
+    '<div class="card"><div class="lbl">Cajas</div><div class="val">' +
+      p.cajas + '</div></div>';
+  let h = '<tr><th>SKU</th><th>Descripción</th><th>Cajas</th>' +
+          '<th>Ubicación</th><th>Disponible</th></tr>';
+  p.lineas.forEach(l => {
+    const color = l.alcanza ? '' : 'color:#b91c1c;font-weight:600;';
+    h += '<tr><td>' + l.sku + '</td><td>' + l.descripcion + '</td>' +
+      '<td class="num">' + l.cantidad + '</td>' +
+      '<td>' + (l.ubicacion || '—') + '</td>' +
+      '<td class="num" style="' + color + '">' + l.disponible +
+      (l.alcanza ? '' : ' ⚠') + '</td></tr>';
+  });
+  document.getElementById('lineas').querySelector('tbody').innerHTML = h;
+}
+cargar();
+</script>
+</body></html>
+"""
+
+PAGINA_CONTRASTE = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contraste volante vs sumario</title><style>""" + ESTILO_OFICINA + """</style></head>
+<body>
+""" + CABECERA.format(titulo="Contraste volante vs sumario") + """
+<div class="wrap">
+  <div class="panel">
+    <h2 style="margin-top:0;">Datos del pallet</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
+      <div style="flex:1;min-width:140px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Camión</div>
+        <input id="camion" placeholder="ej. 012R-01">
+      </div>
+      <div style="flex:1;min-width:110px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Pallet</div>
+        <input id="pallet" placeholder="ej. 001">
+      </div>
+      <button class="btn pri" onclick="cargarPedido()">Ver lo que pide el sumario</button>
+    </div>
+  </div>
+
+  <div id="aviso"></div>
+
+  <div id="caja" class="oculto">
+    <h2>Anote lo que trae el volante</h2>
+    <div class="panel">
+      <table id="captura"><tbody></tbody></table>
+      <button class="btn pri" style="margin-top:12px;" onclick="contrastar()">
+        Contrastar</button>
+    </div>
+  </div>
+
+  <div id="resultado" class="oculto">
+    <h2>Resultado del contraste</h2>
+    <div class="panel"><div id="resumen"></div>
+      <table id="tabla"><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+<footer>Sistema de contingencia</footer>
+<script>
+let pedido = [];
+async function cargarPedido() {
+  const camion = document.getElementById('camion').value.trim();
+  const pallet = document.getElementById('pallet').value.trim();
+  if (!camion || !pallet) {
+    document.getElementById('aviso').innerHTML =
+      '<div class="alerta warn">Complete camión y pallet.</div>';
+    return;
+  }
+  const r = await fetch('/api/pallet?camion=' + encodeURIComponent(camion) +
+                        '&pallet=' + encodeURIComponent(pallet));
+  const j = await r.json();
+  if (!j.ok) {
+    document.getElementById('aviso').innerHTML =
+      '<div class="alerta err">' + (j.error || 'No se encontró') + '</div>';
+    return;
+  }
+  pedido = j.pallet.lineas;
+  let h = '<tr><th>SKU</th><th>Descripción</th><th>Pide el sumario</th>' +
+          '<th>Trae el volante</th></tr>';
+  pedido.forEach(l => {
+    h += '<tr><td>' + l.sku + '</td><td>' + l.descripcion + '</td>' +
+      '<td class="num">' + l.cantidad + '</td>' +
+      '<td style="width:120px;"><input id="v_' + l.sku + '" type="number" ' +
+      'inputmode="numeric" value="' + l.cantidad + '"></td></tr>';
+  });
+  document.getElementById('captura').querySelector('tbody').innerHTML = h;
+  document.getElementById('caja').classList.remove('oculto');
+  document.getElementById('aviso').innerHTML = '';
+}
+async function contrastar() {
+  const camion = document.getElementById('camion').value.trim();
+  const pallet = document.getElementById('pallet').value.trim();
+  const volante = pedido.map(l => ({
+    sku: l.sku,
+    cantidad: parseInt(document.getElementById('v_' + l.sku).value || '0', 10),
+  }));
+  const r = await fetch('/api/contraste', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({camion: camion, pallet: pallet, volante: volante}),
+  });
+  const j = await r.json();
+  if (!j.ok) {
+    document.getElementById('aviso').innerHTML =
+      '<div class="alerta err">' + (j.error || 'Error') + '</div>';
+    return;
+  }
+  const c = j.contraste;
+  const clase = c.ok ? 'ok' : 'warn';
+  document.getElementById('resumen').innerHTML =
+    '<div class="alerta ' + clase + '">' +
+    (c.ok ? 'El volante coincide con el sumario.' :
+     'Revisar: ' + c.faltantes + ' faltantes, ' + c.sobrantes + ' sobrantes.') +
+    '</div>';
+  let h = '<tr><th>SKU</th><th>Descripción</th><th>Sumario</th>' +
+          '<th>Volante</th><th>Diferencia</th><th>Estado</th></tr>';
+  c.filas.forEach(f => {
+    const col = f.estado === 'ok' ? '' : 'color:#b91c1c;font-weight:600;';
+    h += '<tr style="' + col + '"><td>' + f.sku + '</td><td>' + f.descripcion +
+      '</td><td class="num">' + f.sumario + '</td><td class="num">' +
+      f.volante + '</td><td class="num">' + (f.diferencia > 0 ? '+' : '') +
+      f.diferencia + '</td><td>' + f.estado + '</td></tr>';
+  });
+  document.getElementById('tabla').querySelector('tbody').innerHTML = h;
+  document.getElementById('resultado').classList.remove('oculto');
+}
 </script>
 </body></html>
 """
@@ -1395,6 +1577,40 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA_ESTADO)
             return
 
+        if u.path == "/pallet":
+            self._html(PAGINA_PALLET)
+            return
+
+        if u.path == "/contraste":
+            self._html(PAGINA_CONTRASTE)
+            return
+
+        if u.path == "/api/pallet":
+            from . import pallet as pl
+            camion = qs.get("camion", [""])[0].strip()
+            num = qs.get("pallet", [""])[0].strip()
+            p = pl.pallet_de(self.db, camion, num)
+            if p is None:
+                self._json({"ok": False, "error": "pallet no encontrado"}, 404)
+                return
+            self._json({"ok": True, "pallet": {**p.resumen(), "lineas": p.lineas}})
+            return
+
+        if u.path == "/api/pallets":
+            from . import pallet as pl
+            camion = qs.get("camion", [""])[0].strip()
+            self._json({"ok": True, "pallets": pl.pallets_de_camion(self.db, camion)})
+            return
+
+        if u.path == "/api/camiones":
+            from . import sumario as sm
+            try:
+                s = sm.Sumario.cargar(self.db)
+                self._json({"ok": True, "camiones": s.camiones})
+            except Exception:
+                self._json({"ok": True, "camiones": []})
+            return
+
         if u.path == "/cola":
             self._html(PAGINA_COLA)
             return
@@ -1525,6 +1741,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True, "operador": cod,
                         "nombre": operarios.nombre(self.db, cod)})
+            return
+
+        if u.path == "/api/contraste":
+            from . import pallet as pl
+            datos = self._cuerpo()
+            c = pl.contrastar(self.db,
+                              str(datos.get("camion", "")).strip(),
+                              str(datos.get("pallet", "")).strip(),
+                              datos.get("volante", []))
+            self._json({"ok": True, "contraste": {**c.resumen(), "filas": c.filas}})
             return
 
         if u.path == "/api/picking/terminar":

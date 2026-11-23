@@ -548,6 +548,23 @@ El parser arrastra el pallet actual (`leer_texto`). Sin eso se perdían 12 líne
 barras `0801 + camion + pallet` (ej. `0801012R0101` = almacén 0801, camión
 012R01, pallet 01). No hace falta leerlo: el sumario ya trae todo.
 
+**Contraste con la CUADRATURA (proceso central):** el flujo es
+**sumario (venta) vs cuadratura (stock)** para ver si alcanza. La gente que manda
+los sumarios también cuadra, pero **nuestra info está más acabada** porque está
+en bodega. El sistema avisa temprano si falta algo (faltantes al destinar).
+
+**Módulo** `src/pallet.py` — dos cosas del despacho:
+- **Pallet de armado** (`pallet_de`, `pallets_de_camion`): el armador ve el
+  **pallet COMPLETO** con todos sus SKU juntos, la ubicación de cada uno y el
+  stock disponible (marca en rojo si no alcanza). Un pallet mixto tiene 4 SKUs y
+  antes se entregaban como 4 tareas separadas.
+- **Contraste volante vs sumario** (`contrastar`): el **volante** es lo que el
+  pickeador anota **a mano**; en despacho se contrasta contra el sumario. Detecta
+  `falta` / `sobra` / `ok` por SKU, y los SKU anotados que el sumario NO pide.
+- Pantallas: `/pallet?camion=X&pallet=Y` y `/contraste` (digitar lo del volante).
+- Las tareas de picking ahora guardan `camion` y `pallet` (`picking.destinar(...,
+  detalle=sumario.dataframe)`), para saber PARA QUÉ pallet se junta cada SKU.
+
 **Módulo** `src/sumario.py`: `leer_pdf()`, `leer_texto()` (acepta .txt para
 probar), `cargar_desde_archivo()` (detecta .pdf/.txt), `por_camion()`,
 `por_pallet()`, `demanda_por_sku()` (formato que consume `picking.destinar`).
@@ -681,9 +698,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **207 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **222 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

@@ -99,9 +99,17 @@ def preparar_tablas(con: sqlite3.Connection) -> None:
             estado TEXT NOT NULL DEFAULT 'pendiente',
             fecha_ok TEXT,
             usuario TEXT,
-            cantidad_ok INTEGER NOT NULL DEFAULT 0
+            cantidad_ok INTEGER NOT NULL DEFAULT 0,
+            camion TEXT,
+            pallet TEXT
         )
     """)
+    # Migracion: bases viejas sin camion/pallet
+    cols = {r[1] for r in con.execute(f"PRAGMA table_info({TABLA_TAREAS})")}
+    if "camion" not in cols:
+        con.execute(f"ALTER TABLE {TABLA_TAREAS} ADD COLUMN camion TEXT")
+    if "pallet" not in cols:
+        con.execute(f"ALTER TABLE {TABLA_TAREAS} ADD COLUMN pallet TEXT")
     con.execute("""
         CREATE TABLE IF NOT EXISTS picking (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,10 +123,36 @@ def preparar_tablas(con: sqlite3.Connection) -> None:
 # Destinar
 # ---------------------------------------------------------------------------
 
+def _contexto(detalle: pd.DataFrame | None, clave: str,
+              ya_tomado: int) -> tuple[str, str]:
+    """Devuelve (camion, pallet) del sumario para la cantidad ya acumulada de un SKU.
+
+    El mismo SKU puede estar en varios pallets/camiones. Se recorre el detalle en
+    orden y se ubica en cual cae la caja numero `ya_tomado`. Asi cada tarea dice
+    para que camion y pallet es.
+    """
+    if detalle is None or detalle.empty:
+        return "", ""
+    from .externos import clave_sku as _clave
+    d = detalle.copy()
+    d["_clave"] = d["sku"].map(_clave)
+    d = d[d["_clave"] == clave]
+    if d.empty:
+        return "", ""
+    acum = 0
+    for _, r in d.iterrows():
+        acum += int(r["cantidad"])
+        if ya_tomado < acum:
+            return str(r.get("camion", "")), str(r.get("pallet", ""))
+    ultima = d.iloc[-1]
+    return str(ultima.get("camion", "")), str(ultima.get("pallet", ""))
+
+
 def destinar(
     db: str | Path,
     demanda: pd.DataFrame,
     incluir_almacenamiento: bool = True,
+    detalle: pd.DataFrame | None = None,
 ) -> tuple[int, int, pd.DataFrame]:
     """Convierte la demanda en tareas, RESERVANDO el stock de cada una.
 
@@ -127,6 +161,10 @@ def destinar(
     IMPORTANTE: por defecto TAMBIEN busca en ALMACENAMIENTO cuando la ubicacion
     de picking no alcanza. Eso es el flujo real: "en algun momento para completar
     la venta van a traer pallet del almacenamiento para completar" (usuario).
+
+    `detalle` (opcional) es el sumario por pallet (columnas camion, pallet, sku,
+    cantidad). Si se pasa, cada tarea queda etiquetada con el camion y el pallet
+    al que pertenece, para que el armador sepa PARA QUE esta juntando.
 
     Devuelve (tareas_creadas, cajas_reservadas, faltantes).
     """
@@ -153,6 +191,7 @@ def destinar(
         for _, fila in demanda.iterrows():
             clave = str(fila["sku_clave"])
             restante = int(fila["cajas"])
+            tomado_sku = 0
             if restante <= 0:
                 continue
 
@@ -166,15 +205,17 @@ def destinar(
                 if not sv.reservar(con, lote["id"], tomar):
                     continue          # otro Zebra se adelanto; se prueba la siguiente
 
+                camion, pallet = _contexto(detalle, clave, tomado_sku)
                 con.execute(
                     f"""INSERT INTO {TABLA_TAREAS}
                         (ubicacion, sku, sku_clave, descripcion, cantidad, lote,
-                         caducidad, area, fila_stock, reservado)
-                        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                         caducidad, area, fila_stock, reservado, camion, pallet)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (lote["ubicacion"], lote["sku"], clave, lote["descripcion"],
                      tomar, lote["lpn"], lote["fecha_caducidad"], lote["area"],
-                     lote["id"], tomar),
+                     lote["id"], tomar, camion, pallet),
                 )
+                tomado_sku += tomar
                 creadas += 1
                 reservadas += tomar
                 restante -= tomar
