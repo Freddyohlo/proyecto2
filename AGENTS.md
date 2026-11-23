@@ -553,6 +553,27 @@ barras `0801 + camion + pallet` (ej. `0801012R0101` = almacén 0801, camión
 los sumarios también cuadra, pero **nuestra info está más acabada** porque está
 en bodega. El sistema avisa temprano si falta algo (faltantes al destinar).
 
+### 🔍 CHEQUEO FÍSICO POR MUESTREO (proceso de los chequeadores)
+
+Los **chequeadores** usan una **copia impresa del sumario** y verifican una
+**muestra (%)** de los pallets: que la mercadería que llega sea la que sale.
+
+- `src/chequeo.py`:
+  - `elegir_muestra(db, porcentaje=10, semilla=None)` — elige al azar N pallets.
+    Con `semilla` es **reproducible** (auditable). **Siempre elige al menos 1**:
+    un redondeo a 0 dejaría el control vacío.
+  - `ficha(db, camion, pallet)` / `fichas_de_muestra()` — lo que el chequeador
+    verifica (lo que dice el sumario), listo para imprimir.
+  - `registrar(db, camion, pallet, conforme, diferencia, observacion)` — guarda
+    el resultado. Si ya se chequeó, **actualiza** (no duplica).
+  - `resumen()` — chequeos, conformes, diferencias y % conforme.
+  - Tabla `chequeos`.
+- Pantalla `/chequeo`: elegir el %, generar las fichas, **imprimirlas** (tiene
+  estilos `@media print` con casilleros ☐ y línea de firma), y registrar el
+  resultado.
+- El % es **configurable** a propósito: cada bodega define el suyo. No se
+  inventan tablas estadísticas AQL.
+
 ### ⚠️ MODELO REAL: PICKER → STAGING → CONSOLIDADOR (corregido 2026-11-16)
 
 **El picker NO arma pallets.** Flujo real (aclarado por el usuario):
@@ -577,6 +598,9 @@ y deja en STAGING               los pallets de cada camión
   botón "marcar pallet como armado". Se auto-refresca cada 30 s.
 - **Probado con el PDF real:** 35 tareas pickeadas → 5.701 cajas en staging →
   **92/92 pallets completos, 5.701/5.701 cajas**. El flujo cuadra exacto.
+- ⚠️ **La consolidación es de OTRA ÁREA** (aclarado por el usuario). Por eso se
+  **quitó del menú principal**; el módulo y la pantalla quedan disponibles por
+  si algún día la necesitan, pero NO es parte del alcance.
 
 > El picker NO necesita saber para qué pallet es: solo saca y deja. Por eso las
 > tareas guardan `camion`/`pallet` como **contexto informativo**, no como
@@ -727,9 +751,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **234 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **250 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15), `test_consolidacion.py` (12).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15), `test_consolidacion.py` (12), `test_chequeo.py` (16).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

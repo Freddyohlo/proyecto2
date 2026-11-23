@@ -119,10 +119,10 @@ PAGINA_MENU = """<!doctype html>
         <div class="t">Pallet de armado</div>
         <div class="d">Ver el pallet completo con todos sus SKU y ubicaciones</div>
       </a>
-      <a class="op" href="/consolidacion">
+      <a class="op" href="/chequeo">
         <span class="ico">→</span>
-        <div class="t">Consolidación</div>
-        <div class="d">Armar los pallets de cada camión desde staging</div>
+        <div class="t">Chequeo por muestreo</div>
+        <div class="d">Elegir la muestra e imprimir las fichas de chequeo</div>
       </a>
       <a class="op" href="/contraste">
         <span class="ico">→</span>
@@ -916,6 +916,131 @@ async function consolidar() {
 }
 
 cargar();
+</script>
+</body></html>
+"""
+
+
+PAGINA_CHEQUEO = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chequeo por muestreo</title><style>""" + ESTILO_OFICINA + """
+  .ficha { background:#fff; border:1px solid var(--borde); border-radius:8px;
+           padding:16px; margin-bottom:14px; page-break-inside:avoid; }
+  .ficha h3 { margin:0 0 10px; font-size:15px; }
+  .ficha table { font-size:12px; }
+  .ficha .firma { margin-top:14px; border-top:1px dashed var(--borde);
+                  padding-top:8px; font-size:11px; color:var(--suave); }
+  @media print {
+    body { background:#fff; }
+    .noprint { display:none !important; }
+    header { display:none; }
+    .ficha { border:1px solid #999; }
+  }
+</style></head>
+<body>
+""" + CABECERA.format(titulo="Chequeo por muestreo") + """
+<div class="wrap">
+  <div class="noprint">
+    <div class="panel">
+      <h2 style="margin-top:0;">Elegir la muestra</h2>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
+        <div style="flex:1;min-width:150px;">
+          <div style="font-size:12px;color:#64748b;margin-bottom:4px;">
+            % a chequear</div>
+          <input id="pct" type="number" value="10" min="1" max="100">
+        </div>
+        <button class="btn pri" onclick="generar()">Generar muestra</button>
+        <button class="btn" onclick="window.print()">Imprimir fichas</button>
+      </div>
+    </div>
+    <div id="aviso"></div>
+  </div>
+
+  <div id="fichas"></div>
+
+  <div id="cajaChequeo" class="oculto noprint">
+    <h2>Registrar resultado</h2>
+    <div class="panel">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
+        <div style="min-width:120px;">
+          <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Camión</div>
+          <input id="rCamion" readonly>
+        </div>
+        <div style="min-width:90px;">
+          <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Pallet</div>
+          <input id="rPallet" readonly>
+        </div>
+        <div style="flex:2;min-width:200px;">
+          <div style="font-size:12px;color:#64748b;margin-bottom:4px;">
+            Diferencia (si hay)</div>
+          <input id="rDif" placeholder="ej. faltan 2 cajas">
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:4px;">Observación</div>
+        <input id="rObs" placeholder="opcional">
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn pri" onclick="registrar(true)">Conforme</button>
+        <button class="btn" onclick="registrar(false)">Con diferencia</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="resumen" class="noprint"></div>
+</div>
+<footer>Sistema de contingencia</footer>
+<script>
+let palletSel = null;
+async function generar() {
+  const pct = parseInt(document.getElementById('pct').value || '10', 10);
+  const r = await fetch('/api/chequeo/muestra?pct=' + pct);
+  const j = await r.json();
+  if (!j.ok) { alert(j.error || 'Error'); return; }
+  const m = j.muestra;
+  document.getElementById('aviso').innerHTML =
+    '<div class="alerta ok">Muestra: ' + m.cantidad + ' de ' + m.pallets_total +
+    ' pallets (' + m.porcentaje + '%).</div>';
+  let h = '';
+  j.fichas.forEach((f, i) => {
+    h += '<div class="ficha"><h3>Ficha de chequeo — Camión ' + f.camion +
+      ' · Pallet ' + f.pallet + '</h3>' +
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">' +
+      f.skus + ' SKU · ' + f.cajas + ' cajas según sumario</div>' +
+      '<table><tr><th>SKU</th><th>Descripción</th><th>Cajas</th>' +
+      '<th>OK</th><th>Diferencia</th></tr>';
+    f.lineas.forEach(l => {
+      h += '<tr><td>' + l.sku + '</td><td>' + l.descripcion + '</td>' +
+        '<td class="num">' + l.cantidad + '</td>' +
+        '<td style="width:50px;text-align:center;">☐</td>' +
+        '<td style="width:120px;"></td></tr>';
+    });
+    h += '</table><div class="firma">Chequeado por: ____________________ ' +
+      '&nbsp;&nbsp; Fecha: ____/____/______ &nbsp;&nbsp; Firma: ____________' +
+      '</div></div>';
+  });
+  document.getElementById('fichas').innerHTML = h;
+  cargarResumen();
+}
+async function cargarResumen() {
+  const r = await fetch('/api/chequeo/resumen');
+  const j = await r.json();
+  const s = j.resumen;
+  document.getElementById('resumen').innerHTML =
+    '<h2>Resultado de los chequeos</h2><div class="panel">' +
+    '<div class="cards">' +
+    '<div class="card"><div class="lbl">Chequeos</div><div class="val">' +
+      s.chequeos + '</div></div>' +
+    '<div class="card"><div class="lbl">Conformes</div><div class="val">' +
+      s.conformes + '</div></div>' +
+    '<div class="card"><div class="lbl">Con diferencia</div><div class="val">' +
+      s.diferencias + '</div></div>' +
+    '<div class="card"><div class="lbl">% conforme</div><div class="val">' +
+      s.pct_conforme + '%</div></div></div></div>';
+}
+cargarResumen();
 </script>
 </body></html>
 """
@@ -1715,6 +1840,29 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA_CONSOLIDACION)
             return
 
+        if u.path == "/chequeo":
+            self._html(PAGINA_CHEQUEO)
+            return
+
+        if u.path == "/api/chequeo/muestra":
+            from . import chequeo as chq
+            try:
+                pct = int(qs.get("pct", ["10"])[0])
+            except ValueError:
+                pct = 10
+            m = chq.elegir_muestra(self.db, porcentaje=pct)
+            self._json({"ok": True, "muestra": {
+                "porcentaje": m.porcentaje, "pallets_total": m.pallets_total,
+                "cantidad": m.cantidad},
+                "fichas": chq.fichas_de_muestra(self.db, m)})
+            return
+
+        if u.path == "/api/chequeo/resumen":
+            from . import chequeo as chq
+            self._json({"ok": True, "resumen": chq.resumen(self.db),
+                        "chequeos": chq.chequeos(self.db).to_dict("records")})
+            return
+
         if u.path == "/api/consolidacion/resumen":
             from . import consolidacion as cs
             self._json({"ok": True, "resumen": cs.resumen(self.db),
@@ -1892,6 +2040,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True, "operador": cod,
                         "nombre": operarios.nombre(self.db, cod)})
+            return
+
+        if u.path == "/api/chequeo/registrar":
+            from . import chequeo as chq
+            datos = self._cuerpo()
+            r = chq.registrar(self.db,
+                              str(datos.get("camion", "")).strip(),
+                              str(datos.get("pallet", "")).strip(),
+                              bool(datos.get("conforme", True)),
+                              str(datos.get("diferencia", "")).strip(),
+                              str(datos.get("observacion", "")).strip(),
+                              str(datos.get("usuario", "")).strip())
+            self._json(r)
             return
 
         if u.path == "/api/consolidacion/consolidar":
