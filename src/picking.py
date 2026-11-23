@@ -398,6 +398,19 @@ def confirmar(
              t["descripcion"], t["lote"], t["caducidad"]),
         )
 
+        # Lo pickeado se deja en STAGING: ahi los consolidadores arman los
+        # pallets de cada camion. El picker NO arma pallets.
+        sv.ingresar(
+            con,
+            ubicacion=sv.AREA_STAGING,
+            sku=str(t["sku"]),
+            cantidad=cantidad,
+            lpn=str(t["lote"] or ""),
+            descripcion=str(t["descripcion"] or ""),
+            area=sv.AREA_STAGING,
+            fecha_caducidad=str(t["caducidad"] or ""),
+        )
+
         estado = "ok" if cantidad == pedida else "parcial"
         con.execute(
             f"""UPDATE {TABLA_TAREAS}

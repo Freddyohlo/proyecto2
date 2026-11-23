@@ -119,6 +119,11 @@ PAGINA_MENU = """<!doctype html>
         <div class="t">Pallet de armado</div>
         <div class="d">Ver el pallet completo con todos sus SKU y ubicaciones</div>
       </a>
+      <a class="op" href="/consolidacion">
+        <span class="ico">→</span>
+        <div class="t">Consolidación</div>
+        <div class="d">Armar los pallets de cada camión desde staging</div>
+      </a>
       <a class="op" href="/contraste">
         <span class="ico">→</span>
         <div class="t">Contraste volante</div>
@@ -786,6 +791,131 @@ async function contrastar() {
   document.getElementById('tabla').querySelector('tbody').innerHTML = h;
   document.getElementById('resultado').classList.remove('oculto');
 }
+</script>
+</body></html>
+"""
+
+
+PAGINA_CONSOLIDACION = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Consolidación</title><style>""" + ESTILO_OFICINA + """</style></head>
+<body>
+""" + CABECERA.format(titulo="Consolidación — armado de pallets") + """
+<div class="wrap">
+  <div id="aviso"></div>
+  <div class="cards" id="resumen"></div>
+
+  <h2>Lo que hay en staging</h2>
+  <div class="panel"><table id="staging"><tbody></tbody></table></div>
+
+  <h2>Pallets a armar</h2>
+  <div class="panel">
+    <div style="margin-bottom:12px;">
+      <input id="filtro" placeholder="Filtrar por camión (ej. 012R-01)"
+             style="max-width:280px;" oninput="cargar()">
+    </div>
+    <table id="pallets"><tbody></tbody></table>
+  </div>
+
+  <div id="detalle" class="oculto">
+    <h2>Detalle del pallet</h2>
+    <div class="panel">
+      <div id="cabDetalle" style="margin-bottom:12px;"></div>
+      <table id="lineas"><tbody></tbody></table>
+      <button class="btn pri" id="btnConsolidar" style="margin-top:12px;"
+              onclick="consolidar()">Marcar pallet como armado</button>
+    </div>
+  </div>
+</div>
+<footer>Se actualiza solo cada 30 segundos</footer>
+<script>
+let palletActual = null;
+
+function card(lbl, val, sub) {
+  return '<div class="card"><div class="lbl">' + lbl + '</div><div class="val">' +
+         val + (sub ? ' <small>' + sub + '</small>' : '') + '</div></div>';
+}
+
+async function cargar() {
+  const r = await fetch('/api/consolidacion/resumen');
+  const j = await r.json();
+  document.getElementById('resumen').innerHTML =
+    card('Pallets', j.resumen.pallets) +
+    card('Completos', j.resumen.completos, 'listos') +
+    card('Pendientes', j.resumen.pendientes, 'faltan cajas') +
+    card('Cajas juntadas', j.resumen.cajas_juntadas, 'de ' + j.resumen.cajas);
+
+  let st = '<tr><th>SKU</th><th>Descripción</th><th>En staging</th></tr>';
+  (j.staging || []).forEach(x => {
+    st += '<tr><td>' + x.sku + '</td><td>' + (x.descripcion || '—') +
+          '</td><td class="num">' + x.disponible + '</td></tr>';
+  });
+  if (!(j.staging || []).length) st += '<tr><td colspan="3">Staging vacío.</td></tr>';
+  document.getElementById('staging').querySelector('tbody').innerHTML = st;
+
+  const filtro = document.getElementById('filtro').value.trim().toUpperCase();
+  let ps = '<tr><th>Camión</th><th>Pallet</th><th>SKUs</th><th>Pedido</th>' +
+           '<th>Juntado</th><th>Avance</th><th></th></tr>';
+  (j.pallets || []).filter(p => !filtro || p.camion.toUpperCase().includes(filtro))
+    .forEach(p => {
+      const color = p.completo ? 'color:#166534;font-weight:600;' : '';
+      ps += '<tr style="' + color + '"><td>' + p.camion + '</td><td>' + p.pallet +
+        '</td><td class="num">' + p.skus + '</td><td class="num">' + p.pedido +
+        '</td><td class="num">' + p.juntado + '</td>' +
+        '<td style="width:120px;"><div class="barra"><i style="width:' +
+        p.pct + '%"></i></div></td>' +
+        '<td><button class="btn" onclick="verPallet(\'' + p.camion + '\',\'' +
+        p.pallet + '\')">Ver</button></td></tr>';
+    });
+  document.getElementById('pallets').querySelector('tbody').innerHTML = ps;
+}
+
+async function verPallet(camion, pallet) {
+  const r = await fetch('/api/consolidacion/pallet?camion=' +
+                        encodeURIComponent(camion) + '&pallet=' + encodeURIComponent(pallet));
+  const j = await r.json();
+  if (!j.ok) { alert(j.error || 'Error'); return; }
+  palletActual = {camion: camion, pallet: pallet};
+  const p = j.pallet;
+  document.getElementById('cabDetalle').innerHTML =
+    '<b>Camión ' + p.camion + ' · Pallet ' + p.pallet + '</b> — ' +
+    p.juntado + ' de ' + p.pedido + ' cajas (' + p.pct + '%)';
+  let h = '<tr><th>SKU</th><th>Descripción</th><th>Pide</th>' +
+          '<th>En staging</th><th>Consolidado</th><th>Falta</th></tr>';
+  p.lineas.forEach(l => {
+    const col = l.estado === 'ok' ? '' : 'color:#b91c1c;font-weight:600;';
+    h += '<tr style="' + col + '"><td>' + l.sku + '</td><td>' + l.descripcion +
+      '</td><td class="num">' + l.pedido + '</td><td class="num">' +
+      l.en_staging + '</td><td class="num">' + l.consolidado +
+      '</td><td class="num">' + l.falta + '</td></tr>';
+  });
+  document.getElementById('lineas').querySelector('tbody').innerHTML = h;
+  document.getElementById('btnConsolidar').disabled = !p.completo;
+  document.getElementById('btnConsolidar').textContent = p.completo
+    ? 'Marcar pallet como armado' : 'Faltan cajas para consolidar';
+  document.getElementById('detalle').classList.remove('oculto');
+}
+
+async function consolidar() {
+  if (!palletActual) return;
+  if (!confirm('Marcar el pallet ' + palletActual.pallet + ' del camión ' +
+               palletActual.camion + ' como armado?')) return;
+  const r = await fetch('/api/consolidacion/consolidar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({...palletActual, usuario: 'CONSOLIDADOR'}),
+  });
+  const j = await r.json();
+  document.getElementById('aviso').innerHTML = j.ok
+    ? '<div class="alerta ok">Pallet armado: ' + j.cajas + ' cajas.</div>'
+    : '<div class="alerta err">' + (j.error || 'Error') + '</div>';
+  if (j.ok) document.getElementById('detalle').classList.add('oculto');
+  cargar();
+}
+
+cargar();
 </script>
 </body></html>
 """
@@ -1581,6 +1711,27 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA_PALLET)
             return
 
+        if u.path == "/consolidacion":
+            self._html(PAGINA_CONSOLIDACION)
+            return
+
+        if u.path == "/api/consolidacion/resumen":
+            from . import consolidacion as cs
+            self._json({"ok": True, "resumen": cs.resumen(self.db),
+                        "staging": cs.en_staging(self.db).to_dict("records"),
+                        "pallets": cs.pallets_del_dia(self.db)})
+            return
+
+        if u.path == "/api/consolidacion/pallet":
+            from . import consolidacion as cs
+            p = cs.estado_pallet(self.db, qs.get("camion", [""])[0],
+                                 qs.get("pallet", [""])[0])
+            if p is None:
+                self._json({"ok": False, "error": "pallet no encontrado"}, 404)
+                return
+            self._json({"ok": True, "pallet": {**p.resumen(), "lineas": p.lineas}})
+            return
+
         if u.path == "/contraste":
             self._html(PAGINA_CONTRASTE)
             return
@@ -1741,6 +1892,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True, "operador": cod,
                         "nombre": operarios.nombre(self.db, cod)})
+            return
+
+        if u.path == "/api/consolidacion/consolidar":
+            from . import consolidacion as cs
+            datos = self._cuerpo()
+            r = cs.consolidar(self.db, str(datos.get("camion", "")).strip(),
+                              str(datos.get("pallet", "")).strip(),
+                              str(datos.get("usuario", "")).strip())
+            if not r["ok"]:
+                self._json(r, r.get("code", 400))
+                return
+            self._json(r)
             return
 
         if u.path == "/api/contraste":

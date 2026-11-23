@@ -553,6 +553,35 @@ barras `0801 + camion + pallet` (ej. `0801012R0101` = almacén 0801, camión
 los sumarios también cuadra, pero **nuestra info está más acabada** porque está
 en bodega. El sistema avisa temprano si falta algo (faltantes al destinar).
 
+### ⚠️ MODELO REAL: PICKER → STAGING → CONSOLIDADOR (corregido 2026-11-16)
+
+**El picker NO arma pallets.** Flujo real (aclarado por el usuario):
+
+```
+PICKER                          CONSOLIDADOR
+Saca de la ubicación      →     Recibe todo en STAGING y ARMA
+y deja en STAGING               los pallets de cada camión
+```
+
+- `stock_vivo.AREA_STAGING` — área nueva. Al **confirmar** un pick, la mercadería
+  entra a STAGING (`picking.confirmar`), no desaparece.
+- `src/consolidacion.py` — tablero del consolidador:
+  - `en_staging(db)` / `disponible_staging(db, sku)`: qué hay listo para armar.
+  - `estado_pallet(db, camion, pallet)`: por SKU, cuánto pide el sumario, cuánto
+    hay en staging, cuánto ya se consolidó y **cuánto falta**.
+  - `pallets_del_dia(db, camion)`: avance de todos los pallets.
+  - `consolidar(db, camion, pallet)`: descuenta de staging (FEFO) y registra el
+    pallet armado. **No deja consolidar si falta algo** (devuelve los faltantes).
+  - Tabla `consolidado`.
+- Pantalla `/consolidacion`: staging + pallets con barra de avance + detalle +
+  botón "marcar pallet como armado". Se auto-refresca cada 30 s.
+- **Probado con el PDF real:** 35 tareas pickeadas → 5.701 cajas en staging →
+  **92/92 pallets completos, 5.701/5.701 cajas**. El flujo cuadra exacto.
+
+> El picker NO necesita saber para qué pallet es: solo saca y deja. Por eso las
+> tareas guardan `camion`/`pallet` como **contexto informativo**, no como
+> obligación.
+
 **Módulo** `src/pallet.py` — dos cosas del despacho:
 - **Pallet de armado** (`pallet_de`, `pallets_de_camion`): el armador ve el
   **pallet COMPLETO** con todos sus SKU juntos, la ubicación de cada uno y el
@@ -698,9 +727,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **222 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **234 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15), `test_consolidacion.py` (12).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).
