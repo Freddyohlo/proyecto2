@@ -1921,9 +1921,13 @@ class Handler(BaseHTTPRequestHandler):
                 cola_p = [dict(f) for f in con.execute(
                     """SELECT ubicacion, sku, cantidad, usuario FROM tareas
                         WHERE estado = 'pendiente' ORDER BY id LIMIT 60""").fetchall()]
-                cola_r = [dict(f) for f in con.execute(
-                    """SELECT origen, destino, cantidad, operador FROM reapro
-                        WHERE estado = 'pendiente' ORDER BY id LIMIT 60""").fetchall()]
+                # La tabla `reapro` puede no existir si nunca se uso el reapro
+                try:
+                    cola_r = [dict(f) for f in con.execute(
+                        """SELECT origen, destino, cantidad, operador FROM reapro
+                            WHERE estado = 'pendiente' ORDER BY id LIMIT 60""").fetchall()]
+                except Exception:
+                    cola_r = []
             self._json({
                 "ok": True,
                 "movimientos_totales": d.movimientos_totales,
