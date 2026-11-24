@@ -94,6 +94,11 @@ PAGINA_MENU = """<!doctype html>
   <div class="seccion">
     <h2>Operación</h2>
     <div class="grid">
+      <a class="op" href="/consulta">
+        <span class="ico">→</span>
+        <div class="t">Consulta de stock</div>
+        <div class="d">Buscar un código: cuánto hay y en qué ubicaciones</div>
+      </a>
       <a class="op" href="/picking">
         <span class="ico">→</span>
         <div class="t">Picking</div>
@@ -1040,6 +1045,114 @@ cargarResumen();
 </body></html>
 """
 
+
+PAGINA_CONSULTA = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consulta de stock</title><style>""" + ESTILO_OFICINA + """
+  .grande { font-size:44px; font-weight:800; letter-spacing:-.02em; }
+  .destacado { background:#eff6ff; border-color:#93c5fd; }
+</style></head>
+<body>
+""" + CABECERA.format(titulo="Consulta de stock") + """
+<div class="wrap">
+  <div class="panel">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
+      <div style="flex:2;min-width:240px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:4px;">
+          Código del producto (SKU)</div>
+        <input id="codigo" placeholder="ej. 447085 o 00447085"
+               style="font-size:20px;font-weight:600;" autofocus>
+      </div>
+      <button class="btn pri" onclick="buscar()">Consultar</button>
+    </div>
+  </div>
+
+  <div id="aviso"></div>
+  <div id="resultado"></div>
+</div>
+<footer>Sistema de contingencia</footer>
+<script>
+document.getElementById('codigo').addEventListener('keydown', e => {
+  if (e.key === 'Enter') buscar();
+});
+
+async function buscar() {
+  const cod = document.getElementById('codigo').value.trim();
+  if (!cod) return;
+  const r = await fetch('/api/consulta?codigo=' + encodeURIComponent(cod));
+  const j = await r.json();
+  const res = document.getElementById('resultado');
+  const aviso = document.getElementById('aviso');
+
+  if (!j.ok) {
+    aviso.innerHTML = '<div class="alerta warn">' + (j.error || 'Sin resultados') + '</div>';
+    res.innerHTML = '';
+    return;
+  }
+
+  const d = j.stock;
+  if (d.sugerencias) {
+    aviso.innerHTML = '<div class="alerta warn">No existe el código <b>' + cod +
+      '</b>. ¿Quisiste decir?</div>';
+    let h = '<div class="panel"><table><tr><th>SKU</th><th>Descripción</th>' +
+            '<th>Disponible</th><th></th></tr>';
+    d.sugerencias.forEach(s => {
+      h += '<tr><td>' + s.sku + '</td><td>' + s.descripcion +
+        '</td><td class="num">' + s.disponible + '</td>' +
+        '<td><button class="btn" onclick="elegir(\'' + s.sku + '\')">Ver</button></td></tr>';
+    });
+    res.innerHTML = h + '</table></div>';
+    return;
+  }
+
+  aviso.innerHTML = '';
+  res.innerHTML =
+    '<div class="cards">' +
+      '<div class="card destacado" style="grid-column:span 2;">' +
+        '<div class="lbl">Código</div>' +
+        '<div class="val grande">' + d.sku + '</div>' +
+        '<div style="font-size:14px;color:#475569;margin-top:4px;">' +
+          d.descripcion + '</div></div>' +
+      '<div class="card"><div class="lbl">Disponible total</div>' +
+        '<div class="val">' + (d.en_picking + d.en_almacenamiento) + '</div>' +
+        '<div style="font-size:12px;color:#64748b;">listo para usar</div></div>' +
+      '<div class="card"><div class="lbl">En picking</div>' +
+        '<div class="val">' + d.en_picking + '</div></div>' +
+      '<div class="card"><div class="lbl">En almacenamiento</div>' +
+        '<div class="val">' + d.en_almacenamiento + '</div></div>' +
+      '<div class="card"><div class="lbl">En staging</div>' +
+        '<div class="val">' + d.en_staging + '</div>' +
+        '<div style="font-size:12px;color:#64748b;">ya pickeado</div></div>' +
+    '</div>' +
+    '<h2>Ubicaciones</h2><div class="panel"><table>' +
+    '<tr><th>Ubicación</th><th>Área</th><th>Cantidad</th>' +
+    '<th>Reservado</th><th>Pickeado</th><th>Disponible</th></tr>' +
+    d.ubicaciones.map(u =>
+      '<tr><td style="font-weight:600;">' + u.ubicacion + '</td>' +
+      '<td>' + u.area + '</td><td class="num">' + u.cantidad + '</td>' +
+      '<td class="num">' + u.reservado + '</td>' +
+      '<td class="num">' + u.pickeado + '</td>' +
+      '<td class="num" style="font-weight:600;">' + u.disponible + '</td></tr>'
+    ).join('') + '</table></div>' +
+    '<h2>Lotes (FEFO: vence antes primero)</h2><div class="panel"><table>' +
+    '<tr><th>Lote</th><th>Ubicación</th><th>Cantidad</th><th>Vence</th></tr>' +
+    d.lotes.map(l =>
+      '<tr><td>' + (l.lpn || '—') + '</td><td>' + l.ubicacion + '</td>' +
+      '<td class="num">' + l.cantidad + '</td>' +
+      '<td>' + (l.vencimiento || '—') + '</td></tr>'
+    ).join('') + '</table></div>';
+}
+
+function elegir(sku) {
+  document.getElementById('codigo').value = sku;
+  buscar();
+}
+</script>
+</body></html>
+"""
+
 PAGINA_REAPRO = """<!doctype html>
 <html lang="es">
 <head>
@@ -1837,6 +1950,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/chequeo":
             self._html(PAGINA_CHEQUEO)
+            return
+
+        if u.path == "/consulta":
+            self._html(PAGINA_CONSULTA)
+            return
+
+        if u.path == "/api/consulta":
+            from . import consulta as cq
+            r = cq.consultar(self.db, qs.get("codigo", [""])[0])
+            if not r.get("encontrado") and not r.get("sugerencias"):
+                self._json({"ok": False, "error": r.get("error", "sin resultados")},
+                           404)
+                return
+            self._json({"ok": True, "stock": r})
             return
 
         if u.path == "/api/chequeo/muestra":

@@ -37,6 +37,9 @@ AREA_RECEPCION = "RECEPCION"
 # Area destino habitual al ubicar (ubicaciones en altura).
 AREA_ALMACENAMIENTO = "AREA ALMACENAMIENTO"
 
+# AREA PICKING: donde se pickea (ubicacion unica por SKU).
+AREA_PICKING = "AREA PICKING"
+
 # STAGING: donde el pickeador deja lo que saco. Los CONSOLIDADORES arman ahi los
 # pallets de cada camion (no lo hace el pickeador).
 AREA_STAGING = "STAGING"
