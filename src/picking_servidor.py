@@ -395,7 +395,10 @@ ESTILO_OFICINA = """
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:left; padding:8px; border-bottom:1px solid #e2e8f0; }
   th { color:var(--suave); font-weight:600; background:#f8fafc; }
+  /* Los numeros van a la derecha Y su titulo tambien: asi el numero queda
+     justo debajo de la columna que le corresponde. */
   td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  th.num { text-align:right; }
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
   .card { background:#fff; border:1px solid var(--borde); border-radius:8px; padding:14px 16px; }
   .card .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
@@ -469,7 +472,8 @@ async function cargar() {
              (t.ok ? t.ok.cajas : 0) + (t.parcial ? t.parcial.cajas : 0));
   mt += fila('Reaprovisionamiento', rec.movimientos ? '' : '', '');
   document.getElementById('mov').querySelector('tbody').innerHTML = mt;
-  let tt = '<tr><th>Estado</th><th>Tareas</th><th>Cajas</th></tr>';
+  let tt = '<tr><th>Estado</th><th class="num">Tareas</th>' +
+           '<th class="num">Cajas</th></tr>';
   for (const [k, v] of Object.entries(t)) {
     tt += fila(k, v.tareas, v.cajas);
   }
@@ -558,7 +562,8 @@ async function cargar() {
   if (!(j.cola_reapro || []).length) cr += '<tr><td colspan="4">Cola vacía.</td></tr>';
   document.getElementById('colaReapro').querySelector('tbody').innerHTML = cr;
 
-  let p = '<tr><th>Operario</th><th>Movimientos</th><th>Cajas</th></tr>';
+  let p = '<tr><th>Operario</th><th class="num">Movimientos</th>' +
+          '<th class="num">Cajas</th></tr>';
   (j.productividad || []).forEach(x => {
     p += '<tr><td>' + x.etiqueta + '</td><td class="num">' + x.movimientos +
          '</td><td class="num">' + x.cajas + '</td></tr>';
@@ -1132,8 +1137,9 @@ async function buscar() {
         '<div style="font-size:12px;color:#64748b;">ya pickeado</div></div>' +
     '</div>' +
     '<h2>Ubicaciones</h2><div class="panel"><table>' +
-    '<tr><th>Ubicación</th><th>Área</th><th>Cantidad</th>' +
-    '<th>Reservado</th><th>Pickeado</th><th>Disponible</th></tr>' +
+    '<tr><th>Ubicación</th><th>Área</th><th class="num">Cantidad</th>' +
+    '<th class="num">Reservado</th><th class="num">Pickeado</th>' +
+    '<th class="num">Disponible</th></tr>' +
     d.ubicaciones.map(u =>
       '<tr><td style="font-weight:600;">' + u.ubicacion + '</td>' +
       '<td>' + u.area + '</td><td class="num">' + u.cantidad + '</td>' +
@@ -1142,7 +1148,8 @@ async function buscar() {
       '<td class="num" style="font-weight:600;">' + u.disponible + '</td></tr>'
     ).join('') + '</table></div>' +
     '<h2>Lotes (FEFO: vence antes primero)</h2><div class="panel"><table>' +
-    '<tr><th>Lote</th><th>Ubicación</th><th>Cantidad</th><th>Vence</th></tr>' +
+    '<tr><th>Lote</th><th>Ubicación</th><th class="num">Cantidad</th>' +
+    '<th>Vence</th></tr>' +
     d.lotes.map(l =>
       '<tr><td>' + (l.lpn || '—') + '</td><td>' + l.ubicacion + '</td>' +
       '<td class="num">' + l.cantidad + '</td>' +
@@ -1198,9 +1205,6 @@ PAGINA_CUADRATURA = """<!doctype html>
 
   <div class="kpi" id="kpis"></div>
 
-  <h2>Comprometido por carga (fuera del stock libre)</h2>
-  <div class="panel"><table id="cargas"><tbody></tbody></table></div>
-
   <h2>Detalle por SKU</h2>
   <div class="panel"><div class="tabla-scroll">
     <table id="skus"><tbody></tbody></table>
@@ -1236,26 +1240,14 @@ async function cargar() {
     card('Ubicaciones', q.ubicaciones) +
     card('Corte', j.momento.slice(11, 16), j.fecha);
 
-  let c = '<tr><th>Camión</th><th>SKU</th><th>Descripción</th>' +
-          '<th>Reservado</th><th>Pickeado</th><th>Comprometido</th></tr>';
-  (j.cargas || []).forEach(x => {
-    c += '<tr><td style="font-weight:600;">' + x.camion + '</td>' +
-      '<td>' + x.sku + '</td><td>' + (x.descripcion || '—') + '</td>' +
-      '<td class="num">' + x.reservado + '</td>' +
-      '<td class="num">' + x.pickeado + '</td>' +
-      '<td class="num comprometido">' + x.comprometido + '</td></tr>';
-  });
-  if (!(j.cargas || []).length)
-    c += '<tr><td colspan="6">No hay mercadería comprometida.</td></tr>';
-  document.getElementById('cargas').querySelector('tbody').innerHTML = c;
-
   pintarSkus(j.skus_agrupados || []);
   pintarUbicaciones(j.lineas || []);
 }
 
 function pintarSkus(lista) {
-  let h = '<tr><th>SKU</th><th>Descripción</th><th>En bodega</th>' +
-          '<th>Comprometido</th><th>Libre</th><th>Ubic.</th></tr>';
+  let h = '<tr><th>SKU</th><th>Descripción</th><th class="num">En bodega</th>' +
+          '<th class="num">Comprometido</th><th class="num">Libre</th>' +
+          '<th class="num">Ubic.</th></tr>';
   lista.forEach(x => {
     h += '<tr><td>' + x.sku + '</td><td>' + (x.descripcion || '—') + '</td>' +
       '<td class="num">' + x.cantidad + '</td>' +
@@ -1269,7 +1261,8 @@ function pintarSkus(lista) {
 
 function pintarUbicaciones(lineas) {
   let h = '<tr><th>Ubicación</th><th>Área</th><th>SKU</th><th>Descripción</th>' +
-          '<th>Cantidad</th><th>Reservado</th><th>Pickeado</th><th>Libre</th></tr>';
+          '<th class="num">Cantidad</th><th class="num">Reservado</th>' +
+          '<th class="num">Pickeado</th><th class="num">Libre</th></tr>';
   lineas.forEach(x => {
     h += '<tr><td style="font-weight:600;">' + x.ubicacion + '</td>' +
       '<td>' + x.area + '</td><td>' + x.sku + '</td>' +
