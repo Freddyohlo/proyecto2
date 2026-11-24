@@ -44,10 +44,10 @@ from pathlib import Path
 import pandas as pd
 
 # Linea de producto CON pallet: PALLET(3) PRODUCTO(8) DESCRIPCION CANTIDAD
-_RE_PRODUCTO_CON_PALLET = re.compile(r"^(\d{3})\s+(\d{8})\s+(.+?)\s+(\d+)$")
+_RE_PRODUCTO_CON_PALLET = re.compile(r"^(\d{3})\s+(\d{4,14})\s+(.+?)\s+(\d+)$")
 # Linea de producto SIN pallet (continuacion de un pallet mixto):
 #   PRODUCTO(8) DESCRIPCION CANTIDAD
-_RE_PRODUCTO_SIN_PALLET = re.compile(r"^(\d{8})\s+(.+?)\s+(\d+)$")
+_RE_PRODUCTO_SIN_PALLET = re.compile(r"^(\d{4,14})\s+(.+?)\s+(\d+)$")
 _RE_CAMION = re.compile(r"CAMION\s*#\s*:\s*(\S+)")
 _RE_TOTAL = re.compile(r"TOTAL\s*:\s*(\d+)")
 

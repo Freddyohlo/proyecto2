@@ -99,6 +99,11 @@ PAGINA_MENU = """<!doctype html>
         <div class="t">Consulta de stock</div>
         <div class="d">Buscar un código: cuánto hay y en qué ubicaciones</div>
       </a>
+      <a class="op" href="/cuadratura">
+        <span class="ico">→</span>
+        <div class="t">Cuadratura de stock</div>
+        <div class="d">Foto real de la bodega: libre vs comprometido por carga</div>
+      </a>
       <a class="op" href="/picking">
         <span class="ico">→</span>
         <div class="t">Picking</div>
@@ -1153,6 +1158,164 @@ function elegir(sku) {
 </body></html>
 """
 
+
+PAGINA_CUADRATURA = """<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cuadratura de stock</title><style>""" + ESTILO_OFICINA + """
+  .kpi { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+  .kpi .card .val { font-size:26px; }
+  .comprometido { color:#b45309; font-weight:600; }
+  .libre { color:#166534; font-weight:700; }
+  .tabla-scroll { max-height:520px; overflow:auto; }
+  @media print {
+    header, .noprint, footer { display:none !important; }
+    body { background:#fff; }
+    .tabla-scroll { max-height:none; overflow:visible; }
+    .panel { break-inside:auto; }
+    tr { break-inside:avoid; }
+  }
+</style></head>
+<body>
+""" + CABECERA.format(titulo="Cuadratura de stock") + """
+<div class="wrap">
+
+  <div class="noprint">
+    <div class="panel">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;">
+        <div style="flex:1;min-width:200px;">
+          <div style="font-size:12px;color:#64748b;margin-bottom:4px;">
+            Buscar SKU o descripción</div>
+          <input id="filtro" placeholder="ej. 447085" oninput="filtrar()">
+        </div>
+        <button class="btn" onclick="window.print()">Imprimir cuadratura</button>
+        <button class="btn pri" onclick="guardarCorte()">Guardar corte del día</button>
+      </div>
+      <div id="aviso" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <div class="kpi" id="kpis"></div>
+
+  <h2>Comprometido por carga (fuera del stock libre)</h2>
+  <div class="panel"><table id="cargas"><tbody></tbody></table></div>
+
+  <h2>Detalle por SKU</h2>
+  <div class="panel"><div class="tabla-scroll">
+    <table id="skus"><tbody></tbody></table>
+  </div></div>
+
+  <h2>Detalle por ubicación</h2>
+  <div class="panel"><div class="tabla-scroll">
+    <table id="ubicaciones"><tbody></tbody></table>
+  </div></div>
+
+</div>
+<footer>Cuadratura generada por el sistema de contingencia</footer>
+<script>
+let datos = null;
+
+function card(lbl, val, sub, cls) {
+  return '<div class="card"><div class="lbl">' + lbl + '</div>' +
+         '<div class="val ' + (cls || '') + '">' + val +
+         (sub ? ' <small>' + sub + '</small>' : '') + '</div></div>';
+}
+
+async function cargar() {
+  const r = await fetch('/api/cuadratura');
+  const j = await r.json();
+  datos = j;
+  const q = j.resumen;
+
+  document.getElementById('kpis').innerHTML =
+    card('Cajas en bodega', q.cajas) +
+    card('Comprometido', q.reservado + q.pickeado, 'en cargas', 'comprometido') +
+    card('Libre', q.disponible, 'para comprometer', 'libre') +
+    card('SKUs', q.skus) +
+    card('Ubicaciones', q.ubicaciones) +
+    card('Corte', j.momento.slice(11, 16), j.fecha);
+
+  let c = '<tr><th>Camión</th><th>SKU</th><th>Descripción</th>' +
+          '<th>Reservado</th><th>Pickeado</th><th>Comprometido</th></tr>';
+  (j.cargas || []).forEach(x => {
+    c += '<tr><td style="font-weight:600;">' + x.camion + '</td>' +
+      '<td>' + x.sku + '</td><td>' + (x.descripcion || '—') + '</td>' +
+      '<td class="num">' + x.reservado + '</td>' +
+      '<td class="num">' + x.pickeado + '</td>' +
+      '<td class="num comprometido">' + x.comprometido + '</td></tr>';
+  });
+  if (!(j.cargas || []).length)
+    c += '<tr><td colspan="6">No hay mercadería comprometida.</td></tr>';
+  document.getElementById('cargas').querySelector('tbody').innerHTML = c;
+
+  pintarSkus(j.skus_agrupados || []);
+  pintarUbicaciones(j.lineas || []);
+}
+
+function pintarSkus(lista) {
+  let h = '<tr><th>SKU</th><th>Descripción</th><th>En bodega</th>' +
+          '<th>Comprometido</th><th>Libre</th><th>Ubic.</th></tr>';
+  lista.forEach(x => {
+    h += '<tr><td>' + x.sku + '</td><td>' + (x.descripcion || '—') + '</td>' +
+      '<td class="num">' + x.cantidad + '</td>' +
+      '<td class="num comprometido">' + (x.reservado + x.pickeado) + '</td>' +
+      '<td class="num libre">' + x.disponible + '</td>' +
+      '<td class="num">' + x.ubicaciones + '</td></tr>';
+  });
+  document.getElementById('skus').querySelector('tbody').innerHTML =
+    h || '<tr><td colspan="6">Sin datos.</td></tr>';
+}
+
+function pintarUbicaciones(lineas) {
+  let h = '<tr><th>Ubicación</th><th>Área</th><th>SKU</th><th>Descripción</th>' +
+          '<th>Cantidad</th><th>Reservado</th><th>Pickeado</th><th>Libre</th></tr>';
+  lineas.forEach(x => {
+    h += '<tr><td style="font-weight:600;">' + x.ubicacion + '</td>' +
+      '<td>' + x.area + '</td><td>' + x.sku + '</td>' +
+      '<td>' + (x.descripcion || '—') + '</td>' +
+      '<td class="num">' + x.cantidad + '</td>' +
+      '<td class="num">' + x.reservado + '</td>' +
+      '<td class="num">' + x.pickeado + '</td>' +
+      '<td class="num libre">' + x.disponible + '</td></tr>';
+  });
+  document.getElementById('ubicaciones').querySelector('tbody').innerHTML =
+    h || '<tr><td colspan="8">Sin datos.</td></tr>';
+}
+
+function filtrar() {
+  if (!datos) return;
+  const q = document.getElementById('filtro').value.trim().toUpperCase();
+  if (!q) {
+    pintarSkus(datos.skus_agrupados || []);
+    pintarUbicaciones(datos.lineas || []);
+    return;
+  }
+  const match = x => (x.sku || '').toUpperCase().includes(q) ||
+                     (x.descripcion || '').toUpperCase().includes(q);
+  pintarSkus((datos.skus_agrupados || []).filter(match));
+  pintarUbicaciones((datos.lineas || []).filter(match));
+}
+
+async function guardarCorte() {
+  const nota = prompt('Nota del corte (opcional):', 'Corte de las 19:00');
+  if (nota === null) return;
+  const r = await fetch('/api/cuadratura/guardar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({usuario: 'SUPERVISOR', nota: nota}),
+  });
+  const j = await r.json();
+  document.getElementById('aviso').innerHTML = j.ok
+    ? '<div class="alerta ok">Corte guardado: ' + j.lineas + ' líneas, ' +
+      j.cajas + ' cajas.</div>'
+    : '<div class="alerta err">' + (j.error || 'Error') + '</div>';
+}
+
+cargar();
+</script>
+</body></html>
+"""
+
 PAGINA_REAPRO = """<!doctype html>
 <html lang="es">
 <head>
@@ -1952,6 +2115,20 @@ class Handler(BaseHTTPRequestHandler):
             self._html(PAGINA_CHEQUEO)
             return
 
+        if u.path == "/cuadratura":
+            self._html(PAGINA_CUADRATURA)
+            return
+
+        if u.path == "/api/cuadratura":
+            from . import cuadratura as cuad
+            c = cuad.cuadratura_actual(self.db)
+            self._json({"ok": True, "fecha": c.fecha, "momento": c.momento,
+                        "resumen": c.resumen(),
+                        "skus_agrupados": cuad.por_sku(c),
+                        "lineas": c.lineas,
+                        "cargas": cuad.comprometido_por_carga(self.db)})
+            return
+
         if u.path == "/consulta":
             self._html(PAGINA_CONSULTA)
             return
@@ -2166,6 +2343,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True, "operador": cod,
                         "nombre": operarios.nombre(self.db, cod)})
+            return
+
+        if u.path == "/api/cuadratura/guardar":
+            from . import cuadratura as cuad
+            datos = self._cuerpo()
+            r = cuad.guardar_corte(self.db,
+                                   str(datos.get("usuario", "")).strip(),
+                                   str(datos.get("nota", "")).strip())
+            self._json(r)
             return
 
         if u.path == "/api/chequeo/registrar":

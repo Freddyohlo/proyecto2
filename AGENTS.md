@@ -553,6 +553,26 @@ barras `0801 + camion + pallet` (ej. `0801012R0101` = almacén 0801, camión
 los sumarios también cuadra, pero **nuestra info está más acabada** porque está
 en bodega. El sistema avisa temprano si falta algo (faltantes al destinar).
 
+### 📸 CUADRATURA DE STOCK (el corte de las 19:00)
+
+A las 19:00 bodega/WMS manda la cuadratura a transportes para ver si hay stock.
+Ese es el momento del **corte**: se congela la foto y se comparan movimientos.
+
+- `src/cuadratura.py`:
+  - `cuadratura_actual(db)` → la foto AHORA, por ubicación, con **cantidad /
+    reservado / pickeado / disponible**.
+  - `por_sku(cuad)` → agrupada por SKU (el formato que se manda).
+  - `comprometido_por_carga(db, sku)` → **cuánto está comprometido para cada
+    CAMIÓN** (reservado + pickeado). Es lo que el usuario pidió: "cuando busco un
+    SKU, detállame a qué carga se comprometieron y están fuera del stock real".
+  - `guardar_corte(db, usuario, nota)` → congela el corte del día en
+    `cuadraturas` + una tabla `cuadratura_AAAA_MM_DD` con las líneas, para
+    comparar después. Guardar dos veces el mismo día **reemplaza**.
+  - `comparar_con_corte_anterior(db, fecha)` → qué SKUs se movieron y cuánto.
+- Pantalla `/cuadratura`: KPIs (cajas en bodega / comprometido / libre), tabla de
+  **comprometido por carga**, detalle por SKU y por ubicación, buscador, botón de
+  **imprimir** y de **guardar el corte del día**.
+
 ### 🔎 CONSULTA DE STOCK (lo más usado en bodega)
 
 "¿Tengo este código? ¿cuánto y dónde?" — la consulta que el operador hace todo el
@@ -768,9 +788,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **258 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **269 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
-  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15), `test_consolidacion.py` (12), `test_chequeo.py` (16), `test_consulta.py` (8).
+  `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15), `test_consolidacion.py` (12), `test_chequeo.py` (16), `test_consulta.py` (8), `test_cuadratura.py` (11).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
 - Probado con **archivos reales** (2026-11-03): `venta` (TRUCK) → `transito` (SAP) →
   `contraste` ✅ (394 líneas de venta, 2.227 de tránsito).

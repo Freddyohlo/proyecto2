@@ -92,6 +92,10 @@ def consultar(db: str | Path, codigo: str, incluir_agotados: bool = False) -> di
 
     desc = next((str(f["descripcion"]) for f in filas if f["descripcion"]), "")
 
+    # ¿A qué cargas esta comprometido? (lo reservado/pickeado por camion)
+    from . import cuadratura as cua
+    compromiso = cua.comprometido_de(db, codigo)
+
     return {
         "encontrado": True,
         "sku": codigo,
@@ -105,6 +109,12 @@ def consultar(db: str | Path, codigo: str, incluir_agotados: bool = False) -> di
         "pickeado": sum(u["pickeado"] for u in ubicaciones),
         "ubicaciones": ubicaciones,
         "lotes": lotes,
+        "comprometido": compromiso["total"],
+        "comprometido_reservado": compromiso["reservado"],
+        "comprometido_pickeado": compromiso["pickeado"],
+        "cargas": compromiso["camiones"],
+        "n_cargas": compromiso["n_camiones"],
+        "libre_total": sum(u["disponible"] for u in ubicaciones),
     }
 
 
