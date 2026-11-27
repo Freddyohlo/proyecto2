@@ -2589,19 +2589,68 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": False, "error": "ruta desconocida"}, 404)
 
 
+def preparar_base(db: str | Path) -> None:
+    """Crea TODAS las tablas que usan las pantallas, si no existen.
+
+    Asi el servidor arranca con una base vacia y las pantallas muestran ceros
+    en vez de reventar con "no such table".
+    """
+    from . import cuadratura as cuad
+    from . import operarios, recepcion as rc, stock_vivo as sv
+
+    with sv.abrir(db) as con:
+        pk.preparar_tablas(con)          # tareas + picking
+        rc.preparar_tablas(con)          # recepcion + ubicaciones
+        operarios.preparar_tabla(con)    # operarios
+        cuad.preparar_tablas(con)        # cuadraturas
+        # Tablas que se crean solas al usarse, pero las dejamos listas
+        con.execute(f"""
+            CREATE TABLE IF NOT EXISTS {sv.TABLA} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ubicacion TEXT NOT NULL, sku TEXT NOT NULL, sku_clave TEXT NOT NULL,
+                lpn TEXT, descripcion TEXT, area TEXT, fecha_caducidad TEXT,
+                fecha_ord TEXT, cantidad INTEGER NOT NULL,
+                reservado INTEGER NOT NULL DEFAULT 0,
+                pickeado INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS minmax (
+                ubicacion TEXT, sku TEXT, minimo INTEGER, maximo INTEGER
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS sumario (
+                camion TEXT, pallet TEXT, sku TEXT, descripcion TEXT,
+                cantidad INTEGER
+            )
+        """)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Picking guiado de contingencia")
     ap.add_argument("--puerto", type=int, default=8080)
     ap.add_argument("--db", default=DB_DEFECTO)
     args = ap.parse_args()
 
-    if not Path(args.db).exists():
-        raise SystemExit(f"No existe {args.db}. Carga primero el stock.")
+    # La base se crea sola si no existe: asi el servidor arranca igual y se
+    # pueden ver las pantallas (vacias) antes de cargar los datos del dia.
+    ruta = Path(args.db)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    nueva = not ruta.exists()
+    preparar_base(args.db)
+    if nueva:
+        print(f"[i] Se creo {args.db} vacia (sin datos del dia).")
+        print("    Para cargar el stock:")
+        print(f"      python -m src.plan_b_main --db {args.db} cargar --archivo <tsv>")
+        print()
 
     Handler.db = args.db
     servidor = ThreadingHTTPServer(("0.0.0.0", args.puerto), Handler)
-    print(f"Picking guiado en http://0.0.0.0:{args.puerto}/  (base: {args.db})")
-    print("Abrir esa URL desde el Zebra (mismo WiFi). Ctrl+C para salir.")
+    print(f"Servidor en http://0.0.0.0:{args.puerto}/  (base: {args.db})")
+    print(f"En este PC abre:  http://localhost:{args.puerto}")
+    print("Desde el Zebra:   http://<IP-de-este-PC>:" + str(args.puerto))
+    print("Ctrl+C para salir.")
     servidor.serve_forever()
     return 0
 
