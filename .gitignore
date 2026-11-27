@@ -1,0 +1,22 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Configuracion local (puede tener credenciales)
+config.toml
+
+# Datos y salidas generadas
+data/
+output/
+logs/
+
+# Sistema
+.DS_Store
+Thumbs.db
