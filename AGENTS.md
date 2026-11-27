@@ -788,7 +788,9 @@ completar**. Eso ya lo hace el propio destinado de tareas.
 
 ## 11. Estado del prototipo
 
-- **269 tests pasan** en Linux: `tests/test_dashboard.py`, `test_parser.py`,
+- **269 tests pasan** (267 + 2 skipped del PDF). **Verificado en el Windows del
+  usuario** (Python 3.12.3, `C:\planb`): `267 passed, 2 skipped in 19.91s`.
+- En Linux: `tests/test_dashboard.py`, `test_parser.py`,
   `test_informe_picking.py` (18), `test_plan_b.py` (12), `test_externos.py` (11),
   `test_picking_servidor.py` (12), `test_stock_vivo.py` (19), `test_recepcion.py` (26), `test_gs1.py` (27), `test_informe_dia.py` (21), `test_reapro.py` (19), `test_informe_dia.py` (31), `test_operarios.py` (10), `test_sumario.py` (14), `test_pallet.py` (15), `test_consolidacion.py` (12), `test_chequeo.py` (16), `test_consulta.py` (8), `test_cuadratura.py` (11).
 - Probado end-to-end: `cargar → minmax → buscar → sku → reposicion → informe` ✅
@@ -802,6 +804,17 @@ python -m src.main --desde-archivo data/muestra.tsv --sin-correo   # dashboard
 python -m src.main --desde-portapapeles --sin-correo               # TSV del portapapeles
 PYTHONPATH=. python -m pytest tests/ -q                            # tests
 ```
+
+---
+
+## 11b. CÓMO CONTINUAR — leer `TRASPASO.md`
+
+Si abres una conversación nueva, **lee `TRASPASO.md` primero**: tiene el estado
+operativo, los comandos exactos de Windows, el flujo del negocio, los bugs
+históricos y cómo trabajar con este usuario.
+
+**Estado al 2026-11-27:** instalado y funcionando en el PC Windows del usuario
+(`C:\planb`), 267 tests pasan. Falta probar con datos reales del día.
 
 ---
 
